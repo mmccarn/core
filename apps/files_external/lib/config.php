@@ -32,7 +32,7 @@
  */
 
 use phpseclib\Crypt\AES;
-use \OCP\AppFramework\IAppContainer;
+use \OCA\Files_External\Appinfo\Application;
 use \OCA\Files_External\Lib\BackendConfig;
 use \OCA\Files_External\Service\BackendService;
 use \OCA\Files_External\Lib\Backend\LegacyBackend;
@@ -55,17 +55,8 @@ class OC_Mount_Config {
 	// whether to skip backend test (for unit tests, as this static class is not mockable)
 	public static $skipTest = false;
 
-	/** @var IAppContainer */
-	private static $appContainer;
-
-	/**
-	 * Teach OC_Mount_Config about the AppFramework
-	 *
-	 * @param IAppContainer $appContainer
-	 */
-	public static function initApp(IAppContainer $appContainer) {
-		self::$appContainer = $appContainer;
-	}
+	/** @var Application */
+	public static $app;
 
 	/**
 	 * @param string $class
@@ -74,8 +65,8 @@ class OC_Mount_Config {
 	 * @deprecated 8.2.0 use \OCA\Files_External\Service\BackendService::registerBackend()
 	 */
 	public static function registerBackend($class, $definition) {
-		$backendService = self::$appContainer->query('OCA\Files_External\Service\BackendService');
-		$auth = self::$appContainer->query('OCA\Files_External\Lib\Auth\Builtin');
+		$backendService = self::$app->getContainer()->query('OCA\Files_External\Service\BackendService');
+		$auth = self::$app->getContainer()->query('OCA\Files_External\Lib\Auth\Builtin');
 
 		$backendService->registerBackend(new LegacyBackend($class, $definition, $auth));
 
@@ -127,9 +118,9 @@ class OC_Mount_Config {
 	public static function getAbsoluteMountPoints($uid) {
 		$mountPoints = array();
 
-		$userGlobalStoragesService = self::$appContainer->query('OCA\Files_External\Service\UserGlobalStoragesService');
-		$userStoragesService = self::$appContainer->query('OCA\Files_External\Service\UserStoragesService');
-		$user = self::$appContainer->query('OCP\IUserManager')->get($uid);
+		$userGlobalStoragesService = self::$app->getContainer()->query('OCA\Files_External\Service\UserGlobalStoragesService');
+		$userStoragesService = self::$app->getContainer()->query('OCA\Files_External\Service\UserStoragesService');
+		$user = self::$app->getContainer()->query('OCP\IUserManager')->get($uid);
 
 		$userGlobalStoragesService->setUser($user);
 		$userStoragesService->setUser($user);
@@ -167,7 +158,7 @@ class OC_Mount_Config {
 	 */
 	public static function getSystemMountPoints() {
 		$mountPoints = [];
-		$service = self::$appContainer->query('OCA\Files_External\Service\GlobalStoragesService');
+		$service = self::$app->getContainer()->query('OCA\Files_External\Service\GlobalStoragesService');
 
 		foreach ($service->getAllStorages() as $storage) {
 			$mountPoints[] = self::prepareMountPointEntry($storage, false);
@@ -183,7 +174,7 @@ class OC_Mount_Config {
 	 */
 	public static function getPersonalMountPoints() {
 		$mountPoints = [];
-		$service = self::$appContainer->query('OCA\Files_External\Service\UserStoragesService');
+		$service = self::$app->getContainer()->query('OCA\Files_External\Service\UserStoragesService');
 
 		foreach ($service->getAllStorages() as $storage) {
 			$mountPoints[] = self::prepareMountPointEntry($storage, true);
@@ -532,7 +523,7 @@ class OC_Mount_Config {
 			return false;
 		}
 
-		$service = self::$appContainer->query('OCA\Files_External\Service\BackendService');
+		$service = self::$app->getContainer()->query('OCA\Files_External\Service\BackendService');
 		$class = $service->getBackend($options['backend'])->getStorageClass();
 		try {
 			/** @var \OC\Files\Storage\Storage $storage */
