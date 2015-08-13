@@ -28,6 +28,7 @@ namespace OCA\Provisioning_API;
 use \OC_OCS_Result;
 use \OC_SubAdmin;
 use \OC_Helper;
+use \OC_Group;
 use OCP\Files\NotFoundException;
 
 class Users {
@@ -65,10 +66,30 @@ class Users {
 	 */
 	public function getUsers(){
 		$search = !empty($_GET['search']) ? $_GET['search'] : '';
-		$limit = !empty($_GET['limit']) ? $_GET['limit'] : null;
-		$offset = !empty($_GET['offset']) ? $_GET['offset'] : null;
+		$limit = !empty($_GET['limit']) ? $_GET['limit'] : -1;
+		$offset = !empty($_GET['offset']) ? $_GET['offset'] : 0;
 
-		$users = $this->userManager->search($search, $limit, $offset);
+		// Check if user is logged in
+		$user = $this->userSession->getUser();
+		if ($user === null) {
+			return new OC_OCS_Result(null, \OCP\API::RESPOND_UNAUTHORISED);
+		}
+
+		// Admin? Or SubAdmin?
+		if($this->groupManager->isAdmin($user->getUID())){
+			$users = $this->userManager->search($search, $limit, $offset);
+		} elseif(OC_SubAdmin::isSubAdmin($user->getUID())) {
+			$subAdminOfGroups = \OC_SubAdmin::getSubAdminsGroups($user->getUID());
+
+			$batch = [];
+
+			$groupUsers = OC_Group::displayNamesInGroups($subAdminOfGroups, $search, $limit, $offset);
+			foreach($groupUsers as $uid => $displayName) {
+				$batch[$uid] = $displayName;
+			}
+			asort($batch);
+			$users = $batch;
+		}
 		$users = array_keys($users);
 
 		return new OC_OCS_Result([
