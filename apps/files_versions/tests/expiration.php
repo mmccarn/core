@@ -19,7 +19,7 @@
  *
  */
 
-use \OCA\Files_Versions\Expiration;
+namespace \OCA\Files_Versions;
 
 class Expiration_Test extends \PHPUnit_Framework_TestCase {
 	const SECONDS_PER_DAY = 86400; //60*60*24
