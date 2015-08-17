@@ -59,6 +59,7 @@ if (\OC::$server->getConfig()->getSystemValue('installed', false)) {
 	$application->add(new OC\Core\Command\Encryption\Status(\OC::$server->getEncryptionManager()));
 
 	$application->add(new OC\Core\Command\Log\Manage(\OC::$server->getConfig()));
+	$application->add(new OC\Core\Command\Log\Owncloud(\OC::$server->getConfig()));
 
 	$application->add(new OC\Core\Command\Maintenance\MimeTypesJS());
 	$application->add(new OC\Core\Command\Maintenance\Mode(\OC::$server->getConfig()));
