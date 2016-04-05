@@ -184,7 +184,7 @@ class URLGenerator implements IURLGenerator {
 		} elseif (!file_exists(\OC::$SERVERROOT . "/core/img/$basename.svg")
 			&& file_exists(\OC::$SERVERROOT . "/core/img/$basename.png")) {
 			$path =  \OC::$WEBROOT . "/themes/$theme/core/img/$basename.png";
-		} 
+		}
 
 		if($path !== '') {
 			$cache->set($cacheKey, $path);
