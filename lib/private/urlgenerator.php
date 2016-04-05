@@ -149,7 +149,7 @@ class URLGenerator implements IURLGenerator {
 
 		//if a theme has a png but not an svg always use the png
 		$basename = substr(basename($image),0,-4);
-		
+
 		$appPath = \OC_App::getAppPath($app);
 
 		// Check if the app is in the app folder
