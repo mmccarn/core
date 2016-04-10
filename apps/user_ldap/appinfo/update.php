@@ -1,8 +1,9 @@
 <?php
 /**
+ * @author Joas Schilling <nickvergessen@owncloud.com>
  * @author Morris Jobke <hey@morrisjobke.de>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -19,8 +20,5 @@
  *
  */
 
-$installedVersion = \OC::$server->getConfig()->getAppValue('user_ldap', 'installed_version');
-
-if (version_compare($installedVersion, '0.6.1', '<')) {
-	\OC::$server->getConfig()->setAppValue('user_ldap', 'enforce_home_folder_naming_rule', false);
-}
+OCP\Backgroundjob::registerJob('OCA\user_ldap\lib\Jobs');
+OCP\Backgroundjob::registerJob('\OCA\User_LDAP\Jobs\CleanUp');

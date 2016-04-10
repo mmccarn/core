@@ -5,7 +5,7 @@
  * @author Morris Jobke <hey@morrisjobke.de>
  * @author Thomas Müller <thomas.mueller@tmit.eu>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -38,22 +38,52 @@ namespace OCP\Activity;
  * @since 6.0.0
  */
 interface IManager {
+	/**
+	 * Generates a new IEvent object
+	 *
+	 * Make sure to call at least the following methods before sending it to the
+	 * app with via the publish() method:
+	 *  - setApp()
+	 *  - setType()
+	 *  - setAffectedUser()
+	 *  - setSubject()
+	 *
+	 * @return IEvent
+	 * @since 8.2.0
+	 */
+	public function generateEvent();
 
 	/**
-	 * @param $app
-	 * @param $subject
-	 * @param $subjectParams
-	 * @param $message
-	 * @param $messageParams
-	 * @param $file
-	 * @param $link
-	 * @param $affectedUser
-	 * @param $type
-	 * @param $priority
-	 * @return mixed
-	 * @since 6.0.0
+	 * Publish an event to the activity consumers
+	 *
+	 * Make sure to call at least the following methods before sending an Event:
+	 *  - setApp()
+	 *  - setType()
+	 *  - setAffectedUser()
+	 *  - setSubject()
+	 *
+	 * @param IEvent $event
+	 * @return null
+	 * @since 8.2.0
 	 */
-	function publishActivity($app, $subject, $subjectParams, $message, $messageParams, $file, $link, $affectedUser, $type, $priority);
+	public function publish(IEvent $event);
+
+	/**
+	 * @param string $app           The app where this event is associated with
+	 * @param string $subject       A short description of the event
+	 * @param array  $subjectParams Array with parameters that are filled in the subject
+	 * @param string $message       A longer description of the event
+	 * @param array  $messageParams Array with parameters that are filled in the message
+	 * @param string $file          The file including path where this event is associated with
+	 * @param string $link          A link where this event is associated with
+	 * @param string $affectedUser  Recipient of the activity
+	 * @param string $type          Type of the notification
+	 * @param int    $priority      Priority of the notification
+	 * @return null
+	 * @since 6.0.0
+	 * @deprecated 8.2.0 Grab an IEvent from generateEvent() instead and use the publish() method
+	 */
+	public function publishActivity($app, $subject, $subjectParams, $message, $messageParams, $file, $link, $affectedUser, $type, $priority);
 
 	/**
 	 * In order to improve lazy loading a closure can be registered which will be called in case
@@ -65,7 +95,7 @@ interface IManager {
 	 * @return void
 	 * @since 6.0.0
 	 */
-	function registerConsumer(\Closure $callable);
+	public function registerConsumer(\Closure $callable);
 
 	/**
 	 * In order to improve lazy loading a closure can be registered which will be called in case
@@ -77,7 +107,7 @@ interface IManager {
 	 * @return void
 	 * @since 8.0.0
 	 */
-	function registerExtension(\Closure $callable);
+	public function registerExtension(\Closure $callable);
 
 	/**
 	 * Will return additional notification types as specified by other apps
@@ -88,24 +118,36 @@ interface IManager {
 	 * 					'desc' => "translated string description for the setting"
 	 * 					'methods' => [\OCP\Activity\IExtension::METHOD_*],
 	 * 				]
-	 * @since 8.0.0
-	 * @changed 8.2.0 - Added support to allow limiting notifications to certain methods
+	 * @since 8.0.0 - 8.2.0: Added support to allow limiting notifications to certain methods
 	 */
-	function getNotificationTypes($languageCode);
+	public function getNotificationTypes($languageCode);
 
 	/**
 	 * @param string $method
 	 * @return array
 	 * @since 8.0.0
 	 */
-	function getDefaultTypes($method);
+	public function getDefaultTypes($method);
 
 	/**
 	 * @param string $type
 	 * @return string
 	 * @since 8.0.0
 	 */
-	function getTypeIcon($type);
+	public function getTypeIcon($type);
+
+	/**
+	 * @param string $type
+	 * @param int $id
+	 * @since 8.2.0
+	 */
+	public function setFormattingObject($type, $id);
+
+	/**
+	 * @return bool
+	 * @since 8.2.0
+	 */
+	public function isFormattingFilteredObject();
 
 	/**
 	 * @param string $app
@@ -117,7 +159,7 @@ interface IManager {
 	 * @return string|false
 	 * @since 8.0.0
 	 */
-	function translate($app, $text, $params, $stripPath, $highlightParams, $languageCode);
+	public function translate($app, $text, $params, $stripPath, $highlightParams, $languageCode);
 
 	/**
 	 * @param string $app
@@ -125,27 +167,27 @@ interface IManager {
 	 * @return array|false
 	 * @since 8.0.0
 	 */
-	function getSpecialParameterList($app, $text);
+	public function getSpecialParameterList($app, $text);
 
 	/**
 	 * @param array $activity
 	 * @return integer|false
 	 * @since 8.0.0
 	 */
-	function getGroupParameter($activity);
+	public function getGroupParameter($activity);
 
 	/**
 	 * @return array
 	 * @since 8.0.0
 	 */
-	function getNavigation();
+	public function getNavigation();
 
 	/**
 	 * @param string $filterValue
 	 * @return boolean
 	 * @since 8.0.0
 	 */
-	function isFilterValid($filterValue);
+	public function isFilterValid($filterValue);
 
 	/**
 	 * @param array $types
@@ -153,14 +195,24 @@ interface IManager {
 	 * @return array
 	 * @since 8.0.0
 	 */
-	function filterNotificationTypes($types, $filter);
+	public function filterNotificationTypes($types, $filter);
 
 	/**
 	 * @param string $filter
 	 * @return array
 	 * @since 8.0.0
 	 */
-	function getQueryForFilter($filter);
+	public function getQueryForFilter($filter);
+
+
+	/**
+	 * Set the user we need to use
+	 *
+	 * @param string|null $currentUserId
+	 * @throws \UnexpectedValueException If the user is invalid
+	 * @since 9.0.1
+	 */
+	public function setCurrentUserId($currentUserId);
 
 	/**
 	 * Get the user we need to use

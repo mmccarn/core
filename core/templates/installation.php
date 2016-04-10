@@ -30,7 +30,7 @@ script('core', [
 		<legend><strong><?php p($l->t('Security warning'));?></strong></legend>
 		<p><?php p($l->t('Your data directory and files are probably accessible from the internet because the .htaccess file does not work.'));?><br>
 		<?php print_unescaped($l->t(
-			'For information how to properly configure your server, please see the <a href="%s" target="_blank">documentation</a>.',
+			'For information how to properly configure your server, please see the <a href="%s" target="_blank" rel="noreferrer">documentation</a>.',
 			link_to_docs('admin-install')
 		)); ?></p>
 	</fieldset>
@@ -43,7 +43,6 @@ script('core', [
 				value="<?php p($_['adminlogin']); ?>"
 				autocomplete="off" autocapitalize="off" autocorrect="off" autofocus required>
 			<label for="adminlogin" class="infield"><?php p($l->t( 'Username' )); ?></label>
-			<img class="svg" src="<?php p(image_path('', 'actions/user.svg')); ?>" alt="">
 		</p>
 		<p class="groupbottom">
 			<input type="password" name="adminpass" data-typetoggle="#show" id="adminpass"
@@ -51,9 +50,8 @@ script('core', [
 				value="<?php p($_['adminpass']); ?>"
 				autocomplete="off" autocapitalize="off" autocorrect="off" required>
 			<label for="adminpass" class="infield"><?php p($l->t( 'Password' )); ?></label>
-			<img class="svg" id="adminpass-icon" src="<?php print_unescaped(image_path('', 'actions/password.svg')); ?>" alt="">
 			<input type="checkbox" id="show" name="show">
-			<label for="show"></label>
+			<label for="show" class="svg"></label>
 			<div class="strengthify-wrapper"></div>
 		</p>
 	</fieldset>
@@ -87,7 +85,7 @@ script('core', [
 		<p class="info">
 			<?php p($l->t( 'Only %s is available.', array($label) )); ?>
 			<?php p($l->t( 'Install and activate additional PHP modules to choose other database types.' )); ?><br>
-			<a href="<?php print_unescaped(link_to_docs('admin-source_install')); ?>" target="_blank">
+			<a href="<?php print_unescaped(link_to_docs('admin-source_install')); ?>" target="_blank" rel="noreferrer">
 				<?php p($l->t( 'For more details check out the documentation.' )); ?> ↗</a>
 		</p>
 		<input type="hidden" id="dbtype" name="dbtype" value="<?php p($type) ?>">
@@ -149,7 +147,7 @@ script('core', [
 		</fieldset>
 		<?php endif; ?>
 	<?php endif; ?>
-	
+
 	<div class="icon-loading-dark float-spinner">&nbsp;</div>
 
 	<?php if(!$_['dbIsSet'] OR count($_['errors']) > 0): ?>
@@ -166,6 +164,6 @@ script('core', [
 	<p class="info">
 		<span class="icon-info-white svg"></span>
 		<?php p($l->t('Need help?'));?>
-		<a target="_blank" href="<?php p(link_to_docs('admin-install')); ?>"><?php p($l->t('See the documentation'));?> ↗</a>
+		<a target="_blank" rel="noreferrer" href="<?php p(link_to_docs('admin-install')); ?>"><?php p($l->t('See the documentation'));?> ↗</a>
 	</p>
 </form>

@@ -41,10 +41,6 @@ OCA = OCA || {};
 					$element: $('#ldap_override_main_server'),
 					setMethod: 'setOverrideMainServerState'
 				},
-				ldap_nocase: {
-					$element: $('#ldap_nocase'),
-					setMethod: 'setNoCase'
-				},
 				ldap_turn_off_cert_check: {
 					$element: $('#ldap_turn_off_cert_check'),
 					setMethod: 'setCertCheckDisabled'
@@ -58,6 +54,10 @@ OCA = OCA || {};
 				ldap_display_name: {
 					$element: $('#ldap_display_name'),
 					setMethod: 'setUserDisplayName'
+				},
+				ldap_user_display_name_2: {
+					$element: $('#ldap_user_display_name_2'),
+					setMethod: 'setUserDisplayName2'
 				},
 				ldap_base_users: {
 					$element: $('#ldap_base_users'),
@@ -82,6 +82,10 @@ OCA = OCA || {};
 				ldap_group_member_assoc_attribute: {
 					$element: $('#ldap_group_member_assoc_attribute'),
 					setMethod: 'setGroupMemberAssociationAttribute'
+				},
+				ldap_dynamic_group_member_url: {
+					$element: $('#ldap_dynamic_group_member_url'),
+					setMethod: 'setDynamicGroupMemberURL'
 				},
 				ldap_nested_groups: {
 					$element: $('#ldap_nested_groups'),
@@ -166,16 +170,6 @@ OCA = OCA || {};
 		},
 
 		/**
-		 * whether the server is case insensitive. This setting does not play
-		 * a role anymore (probably never had).
-		 *
-		 * @param {string} noCase contains an int
-		 */
-		setNoCase: function(noCase) {
-			this.setElementValue(this.managedItems.ldap_nocase.$element, noCase);
-		},
-
-		/**
 		 * sets whether the SSL/TLS certification check shout be disabled
 		 *
 		 * @param {string} doCertCheck contains an int
@@ -202,6 +196,15 @@ OCA = OCA || {};
 		 */
 		setUserDisplayName: function(attribute) {
 			this.setElementValue(this.managedItems.ldap_display_name.$element, attribute);
+		},
+
+		/**
+		 * sets the additional user display name attribute
+		 *
+		 * @param {string} attribute
+		 */
+		setUserDisplayName2: function(attribute) {
+			this.setElementValue(this.managedItems.ldap_user_display_name_2.$element, attribute);
 		},
 
 		/**
@@ -258,6 +261,15 @@ OCA = OCA || {};
 			this.setElementValue(this.managedItems.ldap_group_member_assoc_attribute.$element, attribute);
 		},
 
+		/**
+		  * sets the dynamic group member url attribute
+		  *
+		  * @param {string} attribute
+		  */
+		setDynamicGroupMemberURL: function(attribute) {
+			this.setElementValue(this.managedItems.ldap_dynamic_group_member_url.$element, attribute);
+		},
+                
 		/**
 		 * enabled or disables the use of nested groups (groups in groups in
 		 * groups…)

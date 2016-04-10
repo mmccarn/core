@@ -24,6 +24,13 @@
 
 namespace Test;
 
+/**
+ * Class Server
+ *
+ * @group DB
+ *
+ * @package Test
+ */
 class Server extends \Test\TestCase {
 	/** @var \OC\Server */
 	protected $server;
@@ -31,7 +38,8 @@ class Server extends \Test\TestCase {
 
 	public function setUp() {
 		parent::setUp();
-		$this->server = new \OC\Server('');
+		$config = new \OC\Config(\OC::$configDir);
+		$this->server = new \OC\Server('', $config);
 	}
 
 	public function dataTestQuery() {
@@ -54,8 +62,12 @@ class Server extends \Test\TestCase {
 			['CapabilitiesManager', '\OC\CapabilitiesManager'],
 			['ContactsManager', '\OC\ContactsManager'],
 			['ContactsManager', '\OCP\Contacts\IManager'],
+			['ContentSecurityPolicyManager', '\OC\Security\CSP\ContentSecurityPolicyManager'],
+			['CommentsManager', '\OCP\Comments\ICommentsManager'],
 			['Crypto', '\OC\Security\Crypto'],
 			['Crypto', '\OCP\Security\ICrypto'],
+			['CryptoWrapper', '\OC\Session\CryptoWrapper'],
+			['CsrfTokenManager', '\OC\Security\CSRF\CsrfTokenManager'],
 
 			['DatabaseConnection', '\OC\DB\Connection'],
 			['DatabaseConnection', '\OCP\IDBConnection'],
@@ -84,11 +96,14 @@ class Server extends \Test\TestCase {
 			['HttpClientService', '\OCP\Http\Client\IClientService'],
 
 			['IniWrapper', '\bantu\IniGetWrapper\IniGetWrapper'],
+			['MimeTypeDetector', '\OCP\Files\IMimeTypeDetector'],
+			['MimeTypeDetector', '\OC\Files\Type\Detection'],
 
 			['JobList', '\OC\BackgroundJob\JobList'],
 			['JobList', '\OCP\BackgroundJob\IJobList'],
 
 			['L10NFactory', '\OC\L10N\Factory'],
+			['L10NFactory', '\OCP\L10N\IFactory'],
 			['LockingProvider', '\OCP\Lock\ILockingProvider'],
 			['Logger', '\OC\Log'],
 			['Logger', '\OCP\ILogger'],
@@ -102,6 +117,8 @@ class Server extends \Test\TestCase {
 
 			['NavigationManager', '\OC\NavigationManager'],
 			['NavigationManager', '\OCP\INavigationManager'],
+			['NotificationManager', '\OC\Notification\Manager'],
+			['NotificationManager', '\OCP\Notification\IManager'],
 			['UserCache', '\OC\Cache\File'],
 			['UserCache', '\OCP\ICache'],
 
@@ -124,6 +141,8 @@ class Server extends \Test\TestCase {
 			['Search', '\OCP\ISearch'],
 			['SecureRandom', '\OC\Security\SecureRandom'],
 			['SecureRandom', '\OCP\Security\ISecureRandom'],
+			['ShareManager', '\OC\Share20\Manager'],
+			['ShareManager', '\OCP\Share\IManager'],
 			['SystemConfig', '\OC\SystemConfig'],
 
 			['URLGenerator', '\OC\URLGenerator'],
@@ -140,6 +159,9 @@ class Server extends \Test\TestCase {
 			['TempManager', '\OC\TempManager'],
 			['TempManager', '\OCP\ITempManager'],
 			['TrustedDomainHelper', '\OC\Security\TrustedDomainHelper'],
+
+			['SystemTagManager', '\OCP\SystemTag\ISystemTagManager'],
+			['SystemTagObjectMapper', '\OCP\SystemTag\ISystemTagObjectMapper'],
 		];
 	}
 
@@ -161,5 +183,17 @@ class Server extends \Test\TestCase {
 	public function testCreateEventSource() {
 		$this->assertInstanceOf('\OC_EventSource', $this->server->createEventSource(), 'service returned by "createEventSource" did not return the right class');
 		$this->assertInstanceOf('\OCP\IEventSource', $this->server->createEventSource(), 'service returned by "createEventSource" did not return the right class');
+	}
+
+	public function testOverwriteDefaultCommentsManager() {
+		$config = $this->server->getConfig();
+		$defaultManagerFactory = $config->getSystemValue('comments.managerFactory', '\OC\Comments\ManagerFactory');
+
+		$config->setSystemValue('comments.managerFactory', '\Test\Comments\FakeFactory');
+
+		$manager = $this->server->getCommentsManager();
+		$this->assertInstanceOf('\OCP\Comments\ICommentsManager', $manager);
+
+		$config->setSystemValue('comments.managerFactory', $defaultManagerFactory);
 	}
 }

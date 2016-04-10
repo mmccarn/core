@@ -7,12 +7,13 @@
  * @author Lennart Rosam <lennart.rosam@medien-systempartner.de>
  * @author Lukas Reschke <lukas@owncloud.com>
  * @author Morris Jobke <hey@morrisjobke.de>
- * @author Robin McCorkell <rmccorkell@karoshi.org.uk>
+ * @author Robin Appelman <icewind@owncloud.com>
+ * @author Robin McCorkell <robin@mccorkell.me.uk>
  * @author Ross Nicoll <jrn@jrn.me.uk>
  * @author SA <stephen@mthosting.net>
  * @author Vincent Petry <pvince81@owncloud.com>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -31,6 +32,7 @@
 namespace OC\Files\Storage;
 use Icewind\Streams\IteratorDirectory;
 
+use Icewind\Streams\RetryWrapper;
 use phpseclib\Net\SFTP\Stream;
 
 /**
@@ -40,14 +42,36 @@ use phpseclib\Net\SFTP\Stream;
 class SFTP extends \OC\Files\Storage\Common {
 	private $host;
 	private $user;
-	private $password;
 	private $root;
 	private $port = 22;
+
+	private $auth;
 
 	/**
 	* @var SFTP
 	*/
 	protected $client;
+
+	/**
+	 * @param string $host protocol://server:port
+	 * @return array [$server, $port]
+	 */
+	private function splitHost($host) {
+		$input = $host;
+		if (strpos($host, '://') === false) {
+			// add a protocol to fix parse_url behavior with ipv6
+			$host = 'http://' . $host;
+		}
+
+		$parsed = parse_url($host);
+		if(is_array($parsed) && isset($parsed['port'])) {
+			return [$parsed['host'], $parsed['port']];
+		} else if (is_array($parsed)) {
+			return [$parsed['host'], 22];
+		} else {
+			return [$input, 22];
+		}
+	}
 
 	/**
 	 * {@inheritdoc}
@@ -56,25 +80,24 @@ class SFTP extends \OC\Files\Storage\Common {
 		// Register sftp://
 		Stream::register();
 
-		$this->host = $params['host'];
+		$parsedHost =  $this->splitHost($params['host']);
 
-		//deals with sftp://server example
-		$proto = strpos($this->host, '://');
-		if ($proto != false) {
-			$this->host = substr($this->host, $proto+3);
+		$this->host = $parsedHost[0];
+		$this->port = $parsedHost[1];
+
+		if (!isset($params['user'])) {
+			throw new \UnexpectedValueException('no authentication parameters specified');
 		}
-
-		//deals with server:port
-		$hasPort = strpos($this->host,':');
-		if($hasPort != false) {
-			$pieces = explode(":", $this->host);
-			$this->host = $pieces[0];
-			$this->port = $pieces[1];
-		}
-
 		$this->user = $params['user'];
-		$this->password
-			= isset($params['password']) ? $params['password'] : '';
+
+		if (isset($params['public_key_auth'])) {
+			$this->auth = $params['public_key_auth'];
+		} elseif (isset($params['password'])) {
+			$this->auth = $params['password'];
+		} else {
+			throw new \UnexpectedValueException('no authentication parameters specified');
+		}
+
 		$this->root
 			= isset($params['root']) ? $this->cleanPath($params['root']) : '/';
 
@@ -112,7 +135,7 @@ class SFTP extends \OC\Files\Storage\Common {
 			$this->writeHostKeys($hostKeys);
 		}
 
-		if (!$this->client->login($this->user, $this->password)) {
+		if (!$this->client->login($this->user, $this->auth)) {
 			throw new \Exception('Login failed');
 		}
 		return $this->client;
@@ -125,7 +148,6 @@ class SFTP extends \OC\Files\Storage\Common {
 		if (
 			!isset($this->host)
 			|| !isset($this->user)
-			|| !isset($this->password)
 		) {
 			return false;
 		}
@@ -177,7 +199,7 @@ class SFTP extends \OC\Files\Storage\Common {
 	}
 
 	/**
-	 * @return bool|string
+	 * @return string|false
 	 */
 	private function hostKeysPath() {
 		try {
@@ -353,7 +375,8 @@ class SFTP extends \OC\Files\Storage\Common {
 				case 'c':
 				case 'c+':
 					$context = stream_context_create(array('sftp' => array('session' => $this->getConnection())));
-					return fopen($this->constructUrl($path), $mode, false, $context);
+					$handle = fopen($this->constructUrl($path), $mode, false, $context);
+					return RetryWrapper::wrap($handle);
 			}
 		} catch (\Exception $e) {
 		}
@@ -438,7 +461,7 @@ class SFTP extends \OC\Files\Storage\Common {
 		// Do not pass the password here. We want to use the Net_SFTP object
 		// supplied via stream context or fail. We only supply username and
 		// hostname because this might show up in logs (they are not used).
-		$url = 'sftp://'.$this->user.'@'.$this->host.':'.$this->port.$this->root.$path;
+		$url = 'sftp://' . urlencode($this->user) . '@' . $this->host . ':' . $this->port . $this->root . $path;
 		return $url;
 	}
 }

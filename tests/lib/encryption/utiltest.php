@@ -109,7 +109,11 @@ class UtilTest extends TestCase {
 	/**
 	 * @dataProvider providePathsForTestIsExcluded
 	 */
-	public function testIsExcluded($path, $expected) {
+	public function testIsExcluded($path, $keyStorageRoot, $expected) {
+		$this->config->expects($this->once())
+			->method('getAppValue')
+			->with('core', 'encryption_key_storage_root', '')
+			->willReturn($keyStorageRoot);
 		$this->userManager
 			->expects($this->any())
 			->method('userExists')
@@ -122,11 +126,14 @@ class UtilTest extends TestCase {
 
 	public function providePathsForTestIsExcluded() {
 		return array(
-			array('/files_encryption', true),
-			array('files_encryption/foo.txt', true),
-			array('test/foo.txt', false),
-			array('/user1/files_encryption/foo.txt', true),
-			array('/user1/files/foo.txt', false),
+			array('/files_encryption', '', true),
+			array('files_encryption/foo.txt', '', true),
+			array('test/foo.txt', '', false),
+			array('/user1/files_encryption/foo.txt', '', true),
+			array('/user1/files/foo.txt', '', false),
+			array('/keyStorage/user1/files/foo.txt', 'keyStorage', true),
+			array('/keyStorage/files_encryption', '/keyStorage', true),
+			array('keyStorage/user1/files_encryption', '/keyStorage/', true),
 
 		);
 	}
@@ -181,49 +188,4 @@ class UtilTest extends TestCase {
 		);
 	}
 
-	/**
-	 * @dataProvider provideWrapStorage
-	 */
-	public function testWrapStorage($expectedWrapped, $wrappedStorages) {
-		$storage = $this->getMockBuilder('OC\Files\Storage\Storage')
-			->disableOriginalConstructor()
-			->getMock();
-
-		foreach ($wrappedStorages as $wrapper) {
-			$storage->expects($this->any())
-				->method('instanceOfStorage')
-				->willReturnMap([
-					[$wrapper, true],
-				]);
-		}
-
-		$mount = $this->getMockBuilder('OCP\Files\Mount\IMountPoint')
-			->disableOriginalConstructor()
-			->getMock();
-
-		$returnedStorage = $this->util->wrapStorage('mountPoint', $storage, $mount);
-
-		$this->assertEquals(
-			$expectedWrapped,
-			$returnedStorage->instanceOfStorage('OC\Files\Storage\Wrapper\Encryption'),
-			'Asserted that the storage is (not) wrapped with encryption'
-		);
-	}
-
-	public function provideWrapStorage() {
-		return [
-			// Wrap when not wrapped or not wrapped with storage
-			[true, []],
-			[true, ['OCA\Files_Trashbin\Storage']],
-
-			// Do not wrap shared storages
-			[false, ['OC\Files\Storage\Shared']],
-			[false, ['OCA\Files_Sharing\External\Storage']],
-			[false, ['OC\Files\Storage\OwnCloud']],
-			[false, ['OC\Files\Storage\Shared', 'OCA\Files_Sharing\External\Storage']],
-			[false, ['OC\Files\Storage\Shared', 'OC\Files\Storage\OwnCloud']],
-			[false, ['OCA\Files_Sharing\External\Storage', 'OC\Files\Storage\OwnCloud']],
-			[false, ['OC\Files\Storage\Shared', 'OCA\Files_Sharing\External\Storage', 'OC\Files\Storage\OwnCloud']],
-		];
-	}
 }

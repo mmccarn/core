@@ -15,17 +15,18 @@
 	var TEMPLATE_FAVORITE_ACTION =
 		'<a href="#" ' +
 		'class="action action-favorite {{#isFavorite}}permanent{{/isFavorite}}">' +
-		'<img class="svg" alt="{{altText}}" src="{{imgFile}}" />' +
+		'<span class="icon {{iconClass}}" />' +
+		'<span class="hidden-visually">{{altText}}</span>' +
 		'</a>';
 
 	/**
-	 * Returns the path to the star image
+	 * Returns the icon class for the matching state
 	 *
 	 * @param {boolean} state true if starred, false otherwise
-	 * @return {string} path to star image
+	 * @return {string} icon class for star image
 	 */
-	function getStarImage(state) {
-		return OC.imagePath('core', state ? 'actions/starred' : 'actions/star');
+	function getStarIconClass(state) {
+		return state ? 'icon-starred' : 'icon-star';
 	}
 
 	/**
@@ -41,7 +42,7 @@
 		return this._template({
 			isFavorite: state,
 			altText: state ? t('files', 'Favorited') : t('files', 'Favorite'),
-			imgFile: getStarImage(state)
+			iconClass: getStarIconClass(state)
 		});
 	}
 
@@ -52,8 +53,7 @@
 	 * @param {boolean} state true if starred, false otherwise
 	 */
 	function toggleStar($actionEl, state) {
-		$actionEl.find('img').attr('src', getStarImage(state));
-		$actionEl.hide().show(0); //force Safari to redraw element on src change
+		$actionEl.removeClass('icon-star icon-starred').addClass(getStarIconClass(state));
 		$actionEl.toggleClass('permanent', state);
 	}
 
@@ -78,7 +78,7 @@
 			// register "star" action
 			fileActions.registerAction({
 				name: 'Favorite',
-				displayName: 'Favorite',
+				displayName: t('files', 'Favorite'),
 				mime: 'all',
 				permissions: OC.PERMISSION_READ,
 				type: OCA.Files.FileActions.TYPE_INLINE,
@@ -92,6 +92,7 @@
 				actionHandler: function(fileName, context) {
 					var $actionEl = context.$file.find('.action-favorite');
 					var $file = context.$file;
+					var fileInfo = context.fileList.files[$file.index()];
 					var dir = context.dir || context.fileList.getCurrentDirectory();
 					var tags = $file.attr('data-tags');
 					if (_.isUndefined(tags)) {
@@ -106,9 +107,11 @@
 					} else {
 						tags.push(OC.TAG_FAVORITE);
 					}
+
+					// pre-toggle the star
 					toggleStar($actionEl, !isFavorite);
 
-					context.fileInfoModel.set('tags', tags);
+					context.fileInfoModel.trigger('busy', context.fileInfoModel, true);
 
 					self.applyFileTags(
 						dir + '/' + fileName,
@@ -116,17 +119,16 @@
 						$actionEl,
 						isFavorite
 					).then(function(result) {
+						context.fileInfoModel.trigger('busy', context.fileInfoModel, false);
 						// response from server should contain updated tags
 						var newTags = result.tags;
 						if (_.isUndefined(newTags)) {
 							newTags = tags;
 						}
-						var fileInfo = context.fileList.files[$file.index()];
-						// read latest state from result
-						toggleStar($actionEl, (newTags.indexOf(OC.TAG_FAVORITE) >= 0));
-						$file.attr('data-tags', newTags.join('|'));
-						$file.attr('data-favorite', !isFavorite);
-						fileInfo.tags = newTags;
+						context.fileInfoModel.set({
+							'tags': newTags,
+							'favorite': !isFavorite
+						});
 					});
 				}
 			});
@@ -150,9 +152,47 @@
 			var oldElementToFile = fileList.elementToFile;
 			fileList.elementToFile = function($el) {
 				var fileInfo = oldElementToFile.apply(this, arguments);
-				fileInfo.tags = $el.attr('data-tags') || [];
+				var tags = $el.attr('data-tags');
+				if (_.isUndefined(tags)) {
+					tags = '';
+				}
+				tags = tags.split('|');
+				tags = _.without(tags, '');
+				fileInfo.tags = tags;
 				return fileInfo;
 			};
+
+			var NS_OC = 'http://owncloud.org/ns';
+
+			var oldGetWebdavProperties = fileList._getWebdavProperties;
+			fileList._getWebdavProperties = function() {
+				var props = oldGetWebdavProperties.apply(this, arguments);
+				props.push('{' + NS_OC + '}tags');
+				props.push('{' + NS_OC + '}favorite');
+				return props;
+			};
+
+			fileList.filesClient.addFileInfoParser(function(response) {
+				var data = {};
+				var props = response.propStat[0].properties;
+				var tags = props['{' + NS_OC + '}tags'];
+				var favorite = props['{' + NS_OC + '}favorite'];
+				if (tags && tags.length) {
+					tags = _.chain(tags).filter(function(xmlvalue) {
+						return (xmlvalue.namespaceURI === NS_OC && xmlvalue.nodeName.split(':')[1] === 'tag');
+					}).map(function(xmlvalue) {
+						return xmlvalue.textContent || xmlvalue.text;
+					}).value();
+				}
+				if (tags) {
+					data.tags = tags;
+				}
+				if (favorite && parseInt(favorite, 10) !== 0) {
+					data.tags = data.tags || [];
+					data.tags.push(OC.TAG_FAVORITE);
+				}
+				return data;
+			});
 		},
 
 		attach: function(fileList) {

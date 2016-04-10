@@ -7,11 +7,11 @@
  * @author Morris Jobke <hey@morrisjobke.de>
  * @author Philipp Kapfer <philipp.kapfer@gmx.at>
  * @author Robin Appelman <icewind@owncloud.com>
- * @author Robin McCorkell <rmccorkell@karoshi.org.uk>
+ * @author Robin McCorkell <robin@mccorkell.me.uk>
  * @author Thomas Müller <thomas.mueller@tmit.eu>
  * @author Vincent Petry <pvince81@owncloud.com>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -30,6 +30,8 @@
 
 namespace OC\Files\Storage;
 
+use Icewind\Streams\RetryWrapper;
+
 class FTP extends \OC\Files\Storage\StreamWrapper{
 	private $password;
 	private $user;
@@ -45,11 +47,7 @@ class FTP extends \OC\Files\Storage\StreamWrapper{
 			$this->user=$params['user'];
 			$this->password=$params['password'];
 			if (isset($params['secure'])) {
-				if (is_string($params['secure'])) {
-					$this->secure = ($params['secure'] === 'true');
-				} else {
-					$this->secure = (bool)$params['secure'];
-				}
+				$this->secure = $params['secure'];
 			} else {
 				$this->secure = false;
 			}
@@ -80,7 +78,7 @@ class FTP extends \OC\Files\Storage\StreamWrapper{
 		if ($this->secure) {
 			$url.='s';
 		}
-		$url.='://'.$this->user.':'.$this->password.'@'.$this->host.$this->root.$path;
+		$url.='://'.urlencode($this->user).':'.urlencode($this->password).'@'.$this->host.$this->root.$path;
 		return $url;
 	}
 
@@ -109,7 +107,8 @@ class FTP extends \OC\Files\Storage\StreamWrapper{
 			case 'ab':
 				//these are supported by the wrapper
 				$context = stream_context_create(array('ftp' => array('overwrite' => true)));
-				return fopen($this->constructUrl($path), $mode, false, $context);
+				$handle = fopen($this->constructUrl($path), $mode, false, $context);
+				return RetryWrapper::wrap($handle);
 			case 'r+':
 			case 'w+':
 			case 'wb+':

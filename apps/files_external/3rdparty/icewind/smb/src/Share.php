@@ -7,17 +7,13 @@
 
 namespace Icewind\SMB;
 
-use Icewind\SMB\Exception\AccessDeniedException;
-use Icewind\SMB\Exception\AlreadyExistsException;
 use Icewind\SMB\Exception\ConnectionException;
-use Icewind\SMB\Exception\Exception;
 use Icewind\SMB\Exception\FileInUseException;
 use Icewind\SMB\Exception\InvalidTypeException;
-use Icewind\SMB\Exception\NotEmptyException;
 use Icewind\SMB\Exception\NotFoundException;
 use Icewind\Streams\CallbackWrapper;
 
-class Share implements IShare {
+class Share extends AbstractShare {
 	/**
 	 * @var Server $server
 	 */
@@ -39,13 +35,20 @@ class Share implements IShare {
 	protected $parser;
 
 	/**
+	 * @var \Icewind\SMB\System
+	 */
+	private $system;
+
+	/**
 	 * @param Server $server
 	 * @param string $name
 	 */
 	public function __construct($server, $name) {
+		parent::__construct();
 		$this->server = $server;
 		$this->name = $name;
-		$this->parser = new Parser(new TimeZoneProvider($this->server->getHost()));
+		$this->system = new System();
+		$this->parser = new Parser(new TimeZoneProvider($this->server->getHost(), $this->system));
 	}
 
 	/**
@@ -57,10 +60,12 @@ class Share implements IShare {
 		if ($this->connection and $this->connection->isValid()) {
 			return;
 		}
-		$command = sprintf('%s --authentication-file=/proc/self/fd/3 //%s/%s',
-			Server::CLIENT,
-			$this->server->getHost(),
-			$this->name
+		$workgroupArgument = ($this->server->getWorkgroup()) ? ' -W ' . escapeshellarg($this->server->getWorkgroup()) : '';
+		$command = sprintf('%s %s --authentication-file=%s %s',
+			$this->system->getSmbclientPath(),
+			$workgroupArgument,
+			System::getFD(3),
+			escapeshellarg('//' . $this->server->getHost() . '/' . $this->name)
 		);
 		$this->connection = new Connection($command);
 		$this->connection->writeAuthentication($this->server->getUser(), $this->server->getPassword());
@@ -256,18 +261,19 @@ class Share implements IShare {
 	 */
 	public function read($source) {
 		$source = $this->escapePath($source);
-		// close the single quote, open a double quote where we put the single quote...
-		$source = str_replace('\'', '\'"\'"\'', $source);
 		// since returned stream is closed by the caller we need to create a new instance
 		// since we can't re-use the same file descriptor over multiple calls
-		$command = sprintf('%s --authentication-file=/proc/self/fd/3 //%s/%s -c \'get %s /proc/self/fd/5\'',
-			Server::CLIENT,
-			$this->server->getHost(),
-			$this->name,
-			$source
+		$workgroupArgument = ($this->server->getWorkgroup()) ? ' -W ' . escapeshellarg($this->server->getWorkgroup()) : '';
+		$command = sprintf('%s %s --authentication-file=%s %s',
+			$this->system->getSmbclientPath(),
+			$workgroupArgument,
+			System::getFD(3),
+			escapeshellarg('//' . $this->server->getHost() . '/' . $this->name)
 		);
 		$connection = new Connection($command);
 		$connection->writeAuthentication($this->server->getUser(), $this->server->getPassword());
+		$connection->write('get ' . $source . ' ' . System::getFD(5));
+		$connection->write('exit');
 		$fh = $connection->getFileOutputStream();
 		stream_context_set_option($fh, 'file', 'connection', $connection);
 		return $fh;
@@ -284,23 +290,25 @@ class Share implements IShare {
 	 */
 	public function write($target) {
 		$target = $this->escapePath($target);
-		// close the single quote, open a double quote where we put the single quote...
-		$target = str_replace('\'', '\'"\'"\'', $target);
 		// since returned stream is closed by the caller we need to create a new instance
 		// since we can't re-use the same file descriptor over multiple calls
-		$command = sprintf('%s --authentication-file=/proc/self/fd/3 //%s/%s -c \'put /proc/self/fd/4 %s\'',
-			Server::CLIENT,
-			$this->server->getHost(),
-			$this->name,
-			$target
+		$workgroupArgument = ($this->server->getWorkgroup()) ? ' -W ' . escapeshellarg($this->server->getWorkgroup()) : '';
+		$command = sprintf('%s %s --authentication-file=%s %s',
+			$this->system->getSmbclientPath(),
+			$workgroupArgument,
+			System::getFD(3),
+			escapeshellarg('//' . $this->server->getHost() . '/' . $this->name)
 		);
-		$connection = new RawConnection($command);
+		$connection = new Connection($command);
 		$connection->writeAuthentication($this->server->getUser(), $this->server->getPassword());
 		$fh = $connection->getFileInputStream();
 
+		$connection->write('put ' . System::getFD(4) . ' ' . $target);
+		$connection->write('exit');
+
 		// use a close callback to ensure the upload is finished before continuing
 		// this also serves as a way to keep the connection in scope
-		return CallbackWrapper::wrap($fh, null, null, function () use ($connection) {
+		return CallbackWrapper::wrap($fh, null, null, function () use ($connection, $target) {
 			$connection->close(false); // dont terminate, give the upload some time
 		});
 	}
@@ -378,6 +386,7 @@ class Share implements IShare {
 	 * @return string
 	 */
 	protected function escapePath($path) {
+		$this->verifyPath($path);
 		if ($path === '/') {
 			$path = '';
 		}

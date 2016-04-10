@@ -3,10 +3,10 @@
  * @author Joas Schilling <nickvergessen@owncloud.com>
  * @author Morris Jobke <hey@morrisjobke.de>
  * @author Robin Appelman <icewind@owncloud.com>
- * @author Robin McCorkell <rmccorkell@karoshi.org.uk>
+ * @author Robin McCorkell <robin@mccorkell.me.uk>
  * @author Vincent Petry <pvince81@owncloud.com>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -25,7 +25,7 @@
 
 namespace OC\Files\Node;
 
-use OC\Files\Cache\Cache;
+use OCP\Files\FileInfo;
 use OCP\Files\NotFoundException;
 use OCP\Files\NotPermittedException;
 
@@ -77,93 +77,32 @@ class Folder extends Node implements \OCP\Files\Folder {
 	 * @return Node[]
 	 */
 	public function getDirectoryListing() {
-		$result = array();
+		$folderContent = $this->view->getDirectoryContent($this->path);
 
-		/**
-		 * @var \OC\Files\Storage\Storage $storage
-		 */
-		list($storage, $internalPath) = $this->view->resolvePath($this->path);
-		if ($storage) {
-			$cache = $storage->getCache($internalPath);
-
-			//trigger cache update check
-			$this->view->getFileInfo($this->path);
-
-			$files = $cache->getFolderContents($internalPath);
-		} else {
-			$files = array();
-		}
-
-		//add a folder for any mountpoint in this directory and add the sizes of other mountpoints to the folders
-		$mounts = $this->root->getMountsIn($this->path);
-		$dirLength = strlen($this->path);
-		foreach ($mounts as $mount) {
-			$subStorage = $mount->getStorage();
-			if ($subStorage) {
-				$subCache = $subStorage->getCache('');
-
-				if ($subCache->getStatus('') === Cache::NOT_FOUND) {
-					$subScanner = $subStorage->getScanner('');
-					$subScanner->scanFile('');
-				}
-
-				$rootEntry = $subCache->get('');
-				if ($rootEntry) {
-					$relativePath = trim(substr($mount->getMountPoint(), $dirLength), '/');
-					if ($pos = strpos($relativePath, '/')) {
-						//mountpoint inside subfolder add size to the correct folder
-						$entryName = substr($relativePath, 0, $pos);
-						foreach ($files as &$entry) {
-							if ($entry['name'] === $entryName) {
-								if ($rootEntry['size'] >= 0) {
-									$entry['size'] += $rootEntry['size'];
-								} else {
-									$entry['size'] = -1;
-								}
-							}
-						}
-					} else { //mountpoint in this folder, add an entry for it
-						$rootEntry['name'] = $relativePath;
-						$rootEntry['storageObject'] = $subStorage;
-
-						//remove any existing entry with the same name
-						foreach ($files as $i => $file) {
-							if ($file['name'] === $rootEntry['name']) {
-								$files[$i] = null;
-								break;
-							}
-						}
-						$files[] = $rootEntry;
-					}
-				}
+		return array_map(function(FileInfo $info) {
+			if ($info->getMimetype() === 'httpd/unix-directory') {
+				return new Folder($this->root, $this->view, $info->getPath(), $info);
+			} else {
+				return new File($this->root, $this->view, $info->getPath(), $info);
 			}
-		}
-
-		foreach ($files as $file) {
-			if ($file) {
-				$node = $this->createNode($this->path . '/' . $file['name'], $file);
-				$result[] = $node;
-			}
-		}
-
-		return $result;
+		}, $folderContent);
 	}
 
 	/**
 	 * @param string $path
-	 * @param array $info
+	 * @param FileInfo $info
 	 * @return File|Folder
 	 */
-	protected function createNode($path, $info = array()) {
-		if (!isset($info['mimetype'])) {
+	protected function createNode($path, FileInfo $info = null) {
+		if (is_null($info)) {
 			$isDir = $this->view->is_dir($path);
 		} else {
-			$isDir = $info['mimetype'] === 'httpd/unix-directory';
+			$isDir = $info->getType() === FileInfo::TYPE_FOLDER;
 		}
 		if ($isDir) {
-			return new Folder($this->root, $this->view, $path);
+			return new Folder($this->root, $this->view, $path, $info);
 		} else {
-			return new File($this->root, $this->view, $path);
+			return new File($this->root, $this->view, $path, $info);
 		}
 	}
 
@@ -272,11 +211,13 @@ class Folder extends Node implements \OCP\Files\Folder {
 	private function searchCommon($method, $args) {
 		$files = array();
 		$rootLength = strlen($this->path);
-		/**
-		 * @var \OC\Files\Storage\Storage $storage
-		 */
-		list($storage, $internalPath) = $this->view->resolvePath($this->path);
-		$internalPath = rtrim($internalPath, '/') . '/';
+		$mount = $this->root->getMount($this->path);
+		$storage = $mount->getStorage();
+		$internalPath = $mount->getInternalPath($this->path);
+		$internalPath = rtrim($internalPath, '/');
+		if ($internalPath !== '') {
+			$internalPath = $internalPath . '/';
+		}
 		$internalRootLength = strlen($internalPath);
 
 		$cache = $storage->getCache('');
@@ -287,7 +228,7 @@ class Folder extends Node implements \OCP\Files\Folder {
 				$result['internalPath'] = $result['path'];
 				$result['path'] = substr($result['path'], $internalRootLength);
 				$result['storage'] = $storage;
-				$files[] = $result;
+				$files[] = new \OC\Files\FileInfo($this->path . '/' . $result['path'], $storage, $result['internalPath'], $result, $mount);
 			}
 		}
 
@@ -303,17 +244,14 @@ class Folder extends Node implements \OCP\Files\Folder {
 					$result['internalPath'] = $result['path'];
 					$result['path'] = $relativeMountPoint . $result['path'];
 					$result['storage'] = $storage;
-					$files[] = $result;
+					$files[] = new \OC\Files\FileInfo($this->path . '/' . $result['path'], $storage, $result['internalPath'], $result, $mount);
 				}
 			}
 		}
 
-		$result = array();
-		foreach ($files as $file) {
-			$result[] = $this->createNode($this->normalizePath($this->path . '/' . $file['path']), $file);
-		}
-
-		return $result;
+		return array_map(function(FileInfo $file) {
+			return $this->createNode($file->getPath(), $file);
+		}, $files);
 	}
 
 	/**
@@ -353,8 +291,9 @@ class Folder extends Node implements \OCP\Files\Folder {
 	public function delete() {
 		if ($this->checkPermissions(\OCP\Constants::PERMISSION_DELETE)) {
 			$this->sendHooks(array('preDelete'));
+			$fileInfo = $this->getFileInfo();
 			$this->view->rmdir($this->path);
-			$nonExisting = new NonExistingFolder($this->root, $this->view, $this->path);
+			$nonExisting = new NonExistingFolder($this->root, $this->view, $this->path, $fileInfo);
 			$this->root->emit('\OC\Files', 'postDelete', array($nonExisting));
 			$this->exists = false;
 		} else {

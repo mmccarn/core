@@ -4,10 +4,11 @@
  * @author Jörn Friedrich Dreyer <jfd@butonic.de>
  * @author Morris Jobke <hey@morrisjobke.de>
  * @author Robin Appelman <icewind@owncloud.com>
- * @author Robin McCorkell <rmccorkell@karoshi.org.uk>
+ * @author Robin McCorkell <robin@mccorkell.me.uk>
+ * @author Thomas Müller <thomas.mueller@tmit.eu>
  * @author Vincent Petry <pvince81@owncloud.com>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -29,7 +30,6 @@ namespace OC\Files\Mount;
 use \OC\Files\Filesystem;
 use OC\Files\Storage\StorageFactory;
 use OC\Files\Storage\Storage;
-use OC\Files\Storage\Wrapper\Wrapper;
 use OCP\Files\Mount\IMountPoint;
 
 class MountPoint implements IMountPoint {
@@ -93,11 +93,7 @@ class MountPoint implements IMountPoint {
 		$this->mountPoint = $mountpoint;
 		if ($storage instanceof Storage) {
 			$this->class = get_class($storage);
-			$this->storage = $storage;
-			// only wrap if not already wrapped
-			if (!($this->storage instanceof Wrapper)) {
-				$this->storage = $this->loader->wrap($this, $this->storage);
-			}
+			$this->storage = $this->loader->wrap($this, $storage);
 		} else {
 			// Update old classes to new namespace
 			if (strpos($storage, 'OC_Filestorage_') !== false) {

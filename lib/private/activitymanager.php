@@ -2,10 +2,9 @@
 /**
  * @author Björn Schießle <schiessle@owncloud.com>
  * @author Joas Schilling <nickvergessen@owncloud.com>
- * @author Lukas Reschke <lukas@owncloud.com>
  * @author Thomas Müller <thomas.mueller@tmit.eu>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -24,11 +23,14 @@
 namespace OC;
 
 
+use OC\Activity\Event;
 use OCP\Activity\IConsumer;
+use OCP\Activity\IEvent;
 use OCP\Activity\IExtension;
 use OCP\Activity\IManager;
 use OCP\IConfig;
 use OCP\IRequest;
+use OCP\IUser;
 use OCP\IUserSession;
 
 class ActivityManager implements IManager {
@@ -40,6 +42,15 @@ class ActivityManager implements IManager {
 
 	/** @var IConfig */
 	protected $config;
+
+	/** @var string */
+	protected $formattingObjectType;
+
+	/** @var int */
+	protected $formattingObjectId;
+
+	/** @var string */
+	protected $currentUserId;
 
 	/**
 	 * constructor of the controller
@@ -124,36 +135,87 @@ class ActivityManager implements IManager {
 	}
 
 	/**
-	 * @param $app
-	 * @param $subject
-	 * @param $subjectParams
-	 * @param $message
-	 * @param $messageParams
-	 * @param $file
-	 * @param $link
-	 * @param $affectedUser
-	 * @param $type
-	 * @param $priority
-	 * @return mixed
+	 * Generates a new IEvent object
+	 *
+	 * Make sure to call at least the following methods before sending it to the
+	 * app with via the publish() method:
+	 *  - setApp()
+	 *  - setType()
+	 *  - setAffectedUser()
+	 *  - setSubject()
+	 *
+	 * @return IEvent
 	 */
-	function publishActivity($app, $subject, $subjectParams, $message, $messageParams, $file, $link, $affectedUser, $type, $priority) {
-		foreach($this->getConsumers() as $c) {
-			try {
-				$c->receive(
-					$app,
-					$subject,
-					$subjectParams,
-					$message,
-					$messageParams,
-					$file,
-					$link,
-					$affectedUser,
-					$type,
-					$priority);
-			} catch (\Exception $ex) {
-				// TODO: log the exception
+	public function generateEvent() {
+		return new Event();
+	}
+
+	/**
+	 * Publish an event to the activity consumers
+	 *
+	 * Make sure to call at least the following methods before sending an Event:
+	 *  - setApp()
+	 *  - setType()
+	 *  - setAffectedUser()
+	 *  - setSubject()
+	 *
+	 * @param IEvent $event
+	 * @return null
+	 * @throws \BadMethodCallException if required values have not been set
+	 */
+	public function publish(IEvent $event) {
+		if (!$event->getApp()) {
+			throw new \BadMethodCallException('App not set', 10);
+		}
+		if (!$event->getType()) {
+			throw new \BadMethodCallException('Type not set', 11);
+		}
+		if ($event->getAffectedUser() === null) {
+			throw new \BadMethodCallException('Affected user not set', 12);
+		}
+		if ($event->getSubject() === null || $event->getSubjectParameters() === null) {
+			throw new \BadMethodCallException('Subject not set', 13);
+		}
+
+		if ($event->getAuthor() === null) {
+			if ($this->session->getUser() instanceof IUser) {
+				$event->setAuthor($this->session->getUser()->getUID());
 			}
 		}
+
+		if (!$event->getTimestamp()) {
+			$event->setTimestamp(time());
+		}
+
+		foreach ($this->getConsumers() as $c) {
+			$c->receive($event);
+		}
+	}
+
+	/**
+	 * @param string $app           The app where this event is associated with
+	 * @param string $subject       A short description of the event
+	 * @param array  $subjectParams Array with parameters that are filled in the subject
+	 * @param string $message       A longer description of the event
+	 * @param array  $messageParams Array with parameters that are filled in the message
+	 * @param string $file          The file including path where this event is associated with
+	 * @param string $link          A link where this event is associated with
+	 * @param string $affectedUser  Recipient of the activity
+	 * @param string $type          Type of the notification
+	 * @param int    $priority      Priority of the notification
+	 * @return null
+	 */
+	public function publishActivity($app, $subject, $subjectParams, $message, $messageParams, $file, $link, $affectedUser, $type, $priority) {
+		$event = $this->generateEvent();
+		$event->setApp($app)
+			->setType($type)
+			->setAffectedUser($affectedUser)
+			->setSubject($subject, $subjectParams)
+			->setMessage($message, $messageParams)
+			->setObject('', 0, $file)
+			->setLink($link);
+
+		$this->publish($event);
 	}
 
 	/**
@@ -164,7 +226,7 @@ class ActivityManager implements IManager {
 	 *
 	 * @param \Closure $callable
 	 */
-	function registerConsumer(\Closure $callable) {
+	public function registerConsumer(\Closure $callable) {
 		array_push($this->consumersClosures, $callable);
 		$this->consumers = [];
 	}
@@ -178,7 +240,7 @@ class ActivityManager implements IManager {
 	 * @param \Closure $callable
 	 * @return void
 	 */
-	function registerExtension(\Closure $callable) {
+	public function registerExtension(\Closure $callable) {
 		array_push($this->extensionsClosures, $callable);
 		$this->extensions = [];
 	}
@@ -189,23 +251,35 @@ class ActivityManager implements IManager {
 	 * @param string $languageCode
 	 * @return array
 	 */
-	function getNotificationTypes($languageCode) {
+	public function getNotificationTypes($languageCode) {
+		$filesNotificationTypes = [];
+		$sharingNotificationTypes = [];
+
 		$notificationTypes = array();
 		foreach ($this->getExtensions() as $c) {
 			$result = $c->getNotificationTypes($languageCode);
 			if (is_array($result)) {
+				if (class_exists('\OCA\Files\Activity', false) && $c instanceof \OCA\Files\Activity) {
+					$filesNotificationTypes = $result;
+					continue;
+				}
+				if (class_exists('\OCA\Files_Sharing\Activity', false) && $c instanceof \OCA\Files_Sharing\Activity) {
+					$sharingNotificationTypes = $result;
+					continue;
+				}
+
 				$notificationTypes = array_merge($notificationTypes, $result);
 			}
 		}
 
-		return $notificationTypes;
+		return array_merge($filesNotificationTypes, $sharingNotificationTypes, $notificationTypes);
 	}
 
 	/**
 	 * @param string $method
 	 * @return array
 	 */
-	function getDefaultTypes($method) {
+	public function getDefaultTypes($method) {
 		$defaultTypes = array();
 		foreach ($this->getExtensions() as $c) {
 			$types = $c->getDefaultTypes($method);
@@ -220,7 +294,7 @@ class ActivityManager implements IManager {
 	 * @param string $type
 	 * @return string
 	 */
-	function getTypeIcon($type) {
+	public function getTypeIcon($type) {
 		if (isset($this->typeIcons[$type])) {
 			return $this->typeIcons[$type];
 		}
@@ -238,6 +312,24 @@ class ActivityManager implements IManager {
 	}
 
 	/**
+	 * @param string $type
+	 * @param string $id
+	 */
+	public function setFormattingObject($type, $id) {
+		$this->formattingObjectType = $type;
+		$this->formattingObjectId = (string) $id;
+	}
+
+	/**
+	 * @return bool
+	 */
+	public function isFormattingFilteredObject() {
+		return $this->formattingObjectType !== null && $this->formattingObjectId !== null
+			&& $this->formattingObjectType === $this->request->getParam('object_type')
+			&& $this->formattingObjectId === $this->request->getParam('object_id');
+	}
+
+	/**
 	 * @param string $app
 	 * @param string $text
 	 * @param array $params
@@ -246,7 +338,7 @@ class ActivityManager implements IManager {
 	 * @param string $languageCode
 	 * @return string|false
 	 */
-	function translate($app, $text, $params, $stripPath, $highlightParams, $languageCode) {
+	public function translate($app, $text, $params, $stripPath, $highlightParams, $languageCode) {
 		foreach ($this->getExtensions() as $c) {
 			$translation = $c->translate($app, $text, $params, $stripPath, $highlightParams, $languageCode);
 			if (is_string($translation)) {
@@ -262,7 +354,7 @@ class ActivityManager implements IManager {
 	 * @param string $text
 	 * @return array|false
 	 */
-	function getSpecialParameterList($app, $text) {
+	public function getSpecialParameterList($app, $text) {
 		if (isset($this->specialParameters[$app][$text])) {
 			return $this->specialParameters[$app][$text];
 		}
@@ -287,7 +379,7 @@ class ActivityManager implements IManager {
 	 * @param array $activity
 	 * @return integer|false
 	 */
-	function getGroupParameter($activity) {
+	public function getGroupParameter($activity) {
 		foreach ($this->getExtensions() as $c) {
 			$parameter = $c->getGroupParameter($activity);
 			if ($parameter !== false) {
@@ -301,7 +393,7 @@ class ActivityManager implements IManager {
 	/**
 	 * @return array
 	 */
-	function getNavigation() {
+	public function getNavigation() {
 		$entries = array(
 			'apps' => array(),
 			'top' => array(),
@@ -321,7 +413,7 @@ class ActivityManager implements IManager {
 	 * @param string $filterValue
 	 * @return boolean
 	 */
-	function isFilterValid($filterValue) {
+	public function isFilterValid($filterValue) {
 		if (isset($this->validFilters[$filterValue])) {
 			return $this->validFilters[$filterValue];
 		}
@@ -342,7 +434,7 @@ class ActivityManager implements IManager {
 	 * @param string $filter
 	 * @return array
 	 */
-	function filterNotificationTypes($types, $filter) {
+	public function filterNotificationTypes($types, $filter) {
 		if (!$this->isFilterValid($filter)) {
 			return $types;
 		}
@@ -360,7 +452,7 @@ class ActivityManager implements IManager {
 	 * @param string $filter
 	 * @return array
 	 */
-	function getQueryForFilter($filter) {
+	public function getQueryForFilter($filter) {
 		if (!$this->isFilterValid($filter)) {
 			return [null, null];
 		}
@@ -387,6 +479,19 @@ class ActivityManager implements IManager {
 	}
 
 	/**
+	 * Set the user we need to use
+	 *
+	 * @param string|null $currentUserId
+	 * @throws \UnexpectedValueException If the user is invalid
+	 */
+	public function setCurrentUserId($currentUserId) {
+		if (!is_string($currentUserId) && $currentUserId !== null) {
+			throw new \UnexpectedValueException('The given current user is invalid');
+		}
+		$this->currentUserId = $currentUserId;
+	}
+
+	/**
 	 * Get the user we need to use
 	 *
 	 * Either the user is logged in, or we try to get it from the token
@@ -395,7 +500,9 @@ class ActivityManager implements IManager {
 	 * @throws \UnexpectedValueException If the token is invalid, does not exist or is not unique
 	 */
 	public function getCurrentUserId() {
-		if (!$this->session->isLoggedIn()) {
+		if ($this->currentUserId !== null) {
+			return $this->currentUserId;
+		} else if (!$this->session->isLoggedIn()) {
 			return $this->getUserFromToken();
 		} else {
 			return $this->session->getUser()->getUID();

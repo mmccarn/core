@@ -4,8 +4,9 @@
  * @author Joas Schilling <nickvergessen@owncloud.com>
  * @author Morris Jobke <hey@morrisjobke.de>
  * @author Philippe Jung <phil.jung@free.fr>
+ * @author Thomas Müller <thomas.mueller@tmit.eu>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -26,6 +27,13 @@ namespace OCA\user_ldap\tests;
 
 use OCA\user_ldap\lib\user\Manager;
 
+/**
+ * Class Test_User_Manager
+ *
+ * @group DB
+ *
+ * @package OCA\user_ldap\tests
+ */
 class Test_User_Manager extends \Test\TestCase {
 
 	private function getTestInstances() {
@@ -36,12 +44,23 @@ class Test_User_Manager extends \Test\TestCase {
 		$avaMgr = $this->getMock('\OCP\IAvatarManager');
 		$image = $this->getMock('\OCP\Image');
 		$dbc = $this->getMock('\OCP\IDBConnection');
+		$userMgr = $this->getMock('\OCP\IUserManager');
 
-		return array($access, $config, $filesys, $image, $log, $avaMgr, $dbc);
+		$connection = new \OCA\user_ldap\lib\Connection(
+			$lw  = $this->getMock('\OCA\user_ldap\lib\ILDAPWrapper'),
+			'',
+			null
+		);
+
+		$access->expects($this->any())
+			->method('getConnection')
+			->will($this->returnValue($connection));
+
+		return array($access, $config, $filesys, $image, $log, $avaMgr, $dbc, $userMgr);
 	}
 
 	public function testGetByDNExisting() {
-		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc) =
+		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc, $userMgr) =
 			$this->getTestInstances();
 
 		$inputDN = 'cn=foo,dc=foobar,dc=bar';
@@ -60,7 +79,7 @@ class Test_User_Manager extends \Test\TestCase {
 		$access->expects($this->never())
 			->method('username2dn');
 
-		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc);
+		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc, $userMgr);
 		$manager->setLdapAccess($access);
 		$user = $manager->get($inputDN);
 
@@ -72,7 +91,7 @@ class Test_User_Manager extends \Test\TestCase {
 	}
 
 	public function testGetByEDirectoryDN() {
-		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc) =
+		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc, $userMgr) =
 			$this->getTestInstances();
 
 		$inputDN = 'uid=foo,o=foobar,c=bar';
@@ -91,7 +110,7 @@ class Test_User_Manager extends \Test\TestCase {
 		$access->expects($this->never())
 			->method('username2dn');
 
-		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc);
+		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc, $userMgr);
 		$manager->setLdapAccess($access);
 		$user = $manager->get($inputDN);
 
@@ -99,7 +118,7 @@ class Test_User_Manager extends \Test\TestCase {
 	}
 
 	public function testGetByExoticDN() {
-		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc) =
+		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc, $userMgr) =
 			$this->getTestInstances();
 
 		$inputDN = 'ab=cde,f=ghei,mno=pq';
@@ -118,7 +137,7 @@ class Test_User_Manager extends \Test\TestCase {
 		$access->expects($this->never())
 			->method('username2dn');
 
-		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc);
+		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc, $userMgr);
 		$manager->setLdapAccess($access);
 		$user = $manager->get($inputDN);
 
@@ -126,7 +145,7 @@ class Test_User_Manager extends \Test\TestCase {
 	}
 
 	public function testGetByDNNotExisting() {
-		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc) =
+		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc, $userMgr) =
 			$this->getTestInstances();
 
 		$inputDN = 'cn=gone,dc=foobar,dc=bar';
@@ -146,7 +165,7 @@ class Test_User_Manager extends \Test\TestCase {
 			->with($this->equalTo($inputDN))
 			->will($this->returnValue(false));
 
-		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc);
+		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc, $userMgr);
 		$manager->setLdapAccess($access);
 		$user = $manager->get($inputDN);
 
@@ -154,7 +173,7 @@ class Test_User_Manager extends \Test\TestCase {
 	}
 
 	public function testGetByUidExisting() {
-		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc) =
+		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc, $userMgr) =
 			$this->getTestInstances();
 
 		$dn = 'cn=foo,dc=foobar,dc=bar';
@@ -173,7 +192,7 @@ class Test_User_Manager extends \Test\TestCase {
 			->with($this->equalTo($uid))
 			->will($this->returnValue(false));
 
-		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc);
+		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc, $userMgr);
 		$manager->setLdapAccess($access);
 		$user = $manager->get($uid);
 
@@ -185,7 +204,7 @@ class Test_User_Manager extends \Test\TestCase {
 	}
 
 	public function testGetByUidNotExisting() {
-		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc) =
+		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc, $userMgr) =
 			$this->getTestInstances();
 
 		$dn = 'cn=foo,dc=foobar,dc=bar';
@@ -199,11 +218,43 @@ class Test_User_Manager extends \Test\TestCase {
 			->with($this->equalTo($uid))
 			->will($this->returnValue(false));
 
-		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc);
+		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc, $userMgr);
 		$manager->setLdapAccess($access);
 		$user = $manager->get($uid);
 
 		$this->assertNull($user);
+	}
+
+	public function testGetAttributesAll() {
+		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc, $userMgr) =
+			$this->getTestInstances();
+
+		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc, $userMgr);
+		$manager->setLdapAccess($access);
+
+		$connection = $access->getConnection();
+		$connection->setConfiguration(array('ldapEmailAttribute' => 'mail'));
+
+		$attributes = $manager->getAttributes();
+
+		$this->assertTrue(in_array('dn', $attributes));
+		$this->assertTrue(in_array($access->getConnection()->ldapEmailAttribute, $attributes));
+		$this->assertTrue(in_array('jpegphoto', $attributes));
+		$this->assertTrue(in_array('thumbnailphoto', $attributes));
+	}
+
+	public function testGetAttributesMinimal() {
+		list($access, $config, $filesys, $image, $log, $avaMgr, $dbc, $userMgr) =
+			$this->getTestInstances();
+
+		$manager = new Manager($config, $filesys, $log, $avaMgr, $image, $dbc, $userMgr);
+		$manager->setLdapAccess($access);
+
+		$attributes = $manager->getAttributes(true);
+
+		$this->assertTrue(in_array('dn', $attributes));
+		$this->assertTrue(!in_array('jpegphoto', $attributes));
+		$this->assertTrue(!in_array('thumbnailphoto', $attributes));
 	}
 
 }

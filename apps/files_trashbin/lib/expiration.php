@@ -1,8 +1,9 @@
 <?php
 /**
+ * @author Lukas Reschke <lukas@owncloud.com>
  * @author Victor Dubiniuk <dubiniuk@owncloud.com>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -103,6 +104,18 @@ class Expiration {
 		}
 
 		return $isOlderThanMax || $isMinReached;
+	}
+
+	/**
+	 * @return bool|int
+	 */
+	public function getMaxAgeAsTimestamp() {
+		$maxAge = false;
+		if ($this->isEnabled() && $this->maxAge !== self::NO_OBLIGATION) {
+			$time = $this->timeFactory->getTime();
+			$maxAge = $time - ($this->maxAge * 86400);
+		}
+		return $maxAge;
 	}
 
 	private function parseRetentionObligation(){

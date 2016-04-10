@@ -2,10 +2,11 @@
 /**
  * @author Bernhard Posselt <dev@bernhard-posselt.com>
  * @author Joas Schilling <nickvergessen@owncloud.com>
+ * @author Lukas Reschke <lukas@owncloud.com>
  * @author Morris Jobke <hey@morrisjobke.de>
  * @author Thomas Müller <thomas.mueller@tmit.eu>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -72,7 +73,7 @@ class DependencyAnalyzer {
 	 * 5.2.6.5 and 5.1 will be turned into 5.2 and 5.1
 	 * @param string $first
 	 * @param string $second
-	 * @return array first element is the first version, second element is the
+	 * @return string[] first element is the first version, second element is the
 	 * second version
 	 */
 	private function normalizeVersions($first, $second) {
@@ -96,7 +97,7 @@ class DependencyAnalyzer {
 	 * @return bool result similar to version_compare
 	 */
 	private function compare($first, $second, $operator) {
-		// we cant normalize versions if one of the given parameters is not a
+		// we can't normalize versions if one of the given parameters is not a
 		// version string but null. In case one parameter is null normalization
 		// will therefore be skipped
 		if ($first !== null && $second !== null) {

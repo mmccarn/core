@@ -5,11 +5,11 @@
  * @author Lukas Reschke <lukas@owncloud.com>
  * @author Morris Jobke <hey@morrisjobke.de>
  * @author Robin Appelman <icewind@owncloud.com>
- * @author tbelau666 <thomas.belau@gmx.de>
+ * @author Roeland Jago Douma <rullzer@owncloud.com>
  * @author Thomas Müller <thomas.mueller@tmit.eu>
  * @author Vincent Petry <pvince81@owncloud.com>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -32,15 +32,14 @@ use Doctrine\DBAL\Platforms\MySqlPlatform;
 use Doctrine\DBAL\Platforms\OraclePlatform;
 use Doctrine\DBAL\Platforms\PostgreSqlPlatform;
 use Doctrine\DBAL\Platforms\SqlitePlatform;
+use OCP\IDBConnection;
 
 class MDB2SchemaManager {
-	/**
-	 * @var \OC\DB\Connection $conn
-	 */
+	/** @var \OC\DB\Connection $conn */
 	protected $conn;
 
 	/**
-	 * @param \OCP\IDBConnection $conn
+	 * @param IDBConnection $conn
 	 */
 	public function __construct($conn) {
 		$this->conn = $conn;
@@ -49,13 +48,12 @@ class MDB2SchemaManager {
 	/**
 	 * saves database scheme to xml file
 	 * @param string $file name of file
-	 * @param int|string $mode
 	 * @return bool
 	 *
 	 * TODO: write more documentation
 	 */
 	public function getDbStructure($file) {
-		return \OC_DB_MDB2SchemaWriter::saveSchemaToFile($file, $this->conn);
+		return \OC\DB\MDB2SchemaWriter::saveSchemaToFile($file, $this->conn);
 	}
 
 	/**
@@ -75,19 +73,20 @@ class MDB2SchemaManager {
 	 * @return \OC\DB\Migrator
 	 */
 	public function getMigrator() {
-		$random = \OC::$server->getSecureRandom()->getMediumStrengthGenerator();
+		$random = \OC::$server->getSecureRandom();
 		$platform = $this->conn->getDatabasePlatform();
 		$config = \OC::$server->getConfig();
+		$dispatcher = \OC::$server->getEventDispatcher();
 		if ($platform instanceof SqlitePlatform) {
-			return new SQLiteMigrator($this->conn, $random, $config);
+			return new SQLiteMigrator($this->conn, $random, $config, $dispatcher);
 		} else if ($platform instanceof OraclePlatform) {
-			return new OracleMigrator($this->conn, $random, $config);
+			return new OracleMigrator($this->conn, $random, $config, $dispatcher);
 		} else if ($platform instanceof MySqlPlatform) {
-			return new MySQLMigrator($this->conn, $random, $config);
+			return new MySQLMigrator($this->conn, $random, $config, $dispatcher);
 		} else if ($platform instanceof PostgreSqlPlatform) {
-			return new Migrator($this->conn, $random, $config);
+			return new Migrator($this->conn, $random, $config, $dispatcher);
 		} else {
-			return new NoCheckMigrator($this->conn, $random, $config);
+			return new NoCheckMigrator($this->conn, $random, $config, $dispatcher);
 		}
 	}
 
@@ -95,6 +94,7 @@ class MDB2SchemaManager {
 	 * Reads database schema from file
 	 *
 	 * @param string $file file to read from
+	 * @return \Doctrine\DBAL\Schema\Schema
 	 */
 	private function readSchemaFromFile($file) {
 		$platform = $this->conn->getDatabasePlatform();
@@ -123,7 +123,7 @@ class MDB2SchemaManager {
 	/**
 	 * update the database scheme
 	 * @param string $file file to read structure from
-	 * @return string|boolean
+	 * @return boolean
 	 */
 	public function simulateUpdateDbFromStructure($file) {
 		$toSchema = $this->readSchemaFromFile($file);

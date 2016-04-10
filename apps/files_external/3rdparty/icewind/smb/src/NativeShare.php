@@ -7,7 +7,10 @@
 
 namespace Icewind\SMB;
 
-class NativeShare implements IShare {
+use Icewind\SMB\Exception\InvalidPathException;
+use Icewind\SMB\Exception\InvalidResourceException;
+
+class NativeShare extends AbstractShare {
 	/**
 	 * @var Server $server
 	 */
@@ -28,6 +31,7 @@ class NativeShare implements IShare {
 	 * @param string $name
 	 */
 	public function __construct($server, $name) {
+		parent::__construct();
 		$this->server = $server;
 		$this->name = $name;
 		$this->state = new NativeState();
@@ -43,15 +47,7 @@ class NativeShare implements IShare {
 			return;
 		}
 
-		$user = $this->server->getUser();
-		if (strpos($user, '/')) {
-			list($workgroup, $user) = explode('/', $user);
-		} elseif (strpos($user, '\\')) {
-			list($workgroup, $user) = explode('\\', $user);
-		} else {
-			$workgroup = null;
-		}
-		$this->state->init($workgroup, $user, $this->server->getPassword());
+		$this->state->init($this->server->getWorkgroup(), $this->server->getUser(), $this->server->getPassword());
 	}
 
 	/**
@@ -64,6 +60,7 @@ class NativeShare implements IShare {
 	}
 
 	private function buildUrl($path) {
+		$this->verifyPath($path);
 		$url = sprintf('smb://%s/%s', $this->server->getHost(), $this->name);
 		if ($path) {
 			$path = trim($path, '/');
@@ -149,6 +146,7 @@ class NativeShare implements IShare {
 	 * @throws \Icewind\SMB\Exception\InvalidTypeException
 	 */
 	public function del($path) {
+		$this->connect();
 		return $this->state->unlink($this->buildUrl($path));
 	}
 
@@ -198,11 +196,30 @@ class NativeShare implements IShare {
 	 *
 	 * @throws \Icewind\SMB\Exception\NotFoundException
 	 * @throws \Icewind\SMB\Exception\InvalidTypeException
+	 * @throws \Icewind\SMB\Exception\InvalidPathException
+	 * @throws \Icewind\SMB\Exception\InvalidResourceException
 	 */
 	public function get($source, $target) {
+		if (!$target) {
+			throw new InvalidPathException('Invalid target path: Filename cannot be empty');
+		}
+		$targetHandle = @fopen($target, 'wb');
+		if (!$targetHandle) {
+			$error = error_get_last();
+			if (is_array($error)) {
+				$reason = $error['message'];
+			} else {
+				$reason = 'Unknown error';
+			}
+			throw new InvalidResourceException('Failed opening local file "' . $target . '" for writing: ' . $reason);
+		}
+
 		$this->connect();
 		$sourceHandle = $this->state->open($this->buildUrl($source), 'r');
-		$targetHandle = fopen($target, 'wb');
+		if (!$sourceHandle) {
+			fclose($targetHandle);
+			throw new InvalidResourceException('Failed opening remote file "' . $source . '" for reading');
+		}
 
 		while ($data = $this->state->read($sourceHandle, 4096)) {
 			fwrite($targetHandle, $data);
@@ -222,8 +239,9 @@ class NativeShare implements IShare {
 	 */
 	public function read($source) {
 		$this->connect();
-		$handle = $this->state->open($this->buildUrl($source), 'r');
-		return NativeStream::wrap($this->state, $handle, 'r');
+		$url = $this->buildUrl($source);
+		$handle = $this->state->open($url, 'r');
+		return NativeStream::wrap($this->state, $handle, 'r', $url);
 	}
 
 	/**
@@ -237,8 +255,9 @@ class NativeShare implements IShare {
 	 */
 	public function write($source) {
 		$this->connect();
-		$handle = $this->state->create($this->buildUrl($source));
-		return NativeStream::wrap($this->state, $handle, 'w');
+		$url = $this->buildUrl($source);
+		$handle = $this->state->create($url);
+		return NativeStream::wrap($this->state, $handle, 'w', $url);
 	}
 
 	/**

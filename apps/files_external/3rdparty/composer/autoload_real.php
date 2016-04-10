@@ -23,28 +23,14 @@ class ComposerAutoloaderInit98fe9b281934250b3a93f69a5ce843b3
         self::$loader = $loader = new \Composer\Autoload\ClassLoader();
         spl_autoload_unregister(array('ComposerAutoloaderInit98fe9b281934250b3a93f69a5ce843b3', 'loadClassLoader'));
 
-        $map = require __DIR__ . '/autoload_namespaces.php';
-        foreach ($map as $namespace => $path) {
-            $loader->set($namespace, $path);
-        }
-
-        $map = require __DIR__ . '/autoload_psr4.php';
-        foreach ($map as $namespace => $path) {
-            $loader->setPsr4($namespace, $path);
-        }
-
         $classMap = require __DIR__ . '/autoload_classmap.php';
         if ($classMap) {
             $loader->addClassMap($classMap);
         }
 
+        $loader->setClassMapAuthoritative(true);
         $loader->register(true);
 
         return $loader;
     }
-}
-
-function composerRequire98fe9b281934250b3a93f69a5ce843b3($file)
-{
-    require $file;
 }

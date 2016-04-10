@@ -1,16 +1,21 @@
 <?php
 /**
+ * @author Alex Weirig <alex.weirig@technolink.lu>
  * @author Alexander Bergolth <leo@strike.wu.ac.at>
+ * @author alexweirig <alex.weirig@technolink.lu>
  * @author Andreas Fischer <bantu@owncloud.com>
  * @author Arthur Schiwon <blizzz@owncloud.com>
  * @author Bart Visscher <bartv@thisnet.nl>
  * @author Christopher Schäpers <kondou@ts.unde.re>
+ * @author Frédéric Fortier <frederic.fortier@oronospolytechnique.com>
+ * @author Lukas Reschke <lukas@owncloud.com>
  * @author Morris Jobke <hey@morrisjobke.de>
- * @author Robin McCorkell <rmccorkell@karoshi.org.uk>
+ * @author Nicolas Grekas <nicolas.grekas@gmail.com>
+ * @author Robin McCorkell <robin@mccorkell.me.uk>
  * @author Thomas Müller <thomas.mueller@tmit.eu>
  * @author Vincent Petry <pvince81@owncloud.com>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -145,6 +150,46 @@ class GROUP_LDAP extends BackendUtility implements \OCP\GroupInterface {
 
 	/**
 	 * @param string $dnGroup
+	 * @return array
+	 *
+	 * For a group that has user membership defined by an LDAP search url attribute returns the users
+	 * that match the search url otherwise returns an empty array.
+	 */
+	public function getDynamicGroupMembers($dnGroup) {
+		$dynamicGroupMemberURL = strtolower($this->access->connection->ldapDynamicGroupMemberURL);
+
+		if (empty($dynamicGroupMemberURL)) {
+			return array();
+		}
+
+		$dynamicMembers = array();
+		$memberURLs = $this->access->readAttribute(
+			$dnGroup,
+			$dynamicGroupMemberURL,
+			$this->access->connection->ldapGroupFilter
+		);
+		if ($memberURLs !== false) {
+			// this group has the 'memberURL' attribute so this is a dynamic group
+			// example 1: ldap:///cn=users,cn=accounts,dc=dcsubbase,dc=dcbase??one?(o=HeadOffice)
+			// example 2: ldap:///cn=users,cn=accounts,dc=dcsubbase,dc=dcbase??one?(&(o=HeadOffice)(uidNumber>=500))
+			$pos = strpos($memberURLs[0], '(');
+			if ($pos !== false) {
+				$memberUrlFilter = substr($memberURLs[0], $pos);
+				$foundMembers = $this->access->searchUsers($memberUrlFilter,'dn');
+				$dynamicMembers = array();
+				foreach($foundMembers as $value) {
+					$dynamicMembers[$value['dn'][0]] = 1;
+				}
+			} else {
+				\OCP\Util::writeLog('user_ldap', 'No search filter found on member url '.
+					'of group ' . $dnGroup, \OCP\Util::DEBUG);
+			}
+		}
+		return $dynamicMembers;
+	}
+
+	/**
+	 * @param string $dnGroup
 	 * @param array|null &$seen
 	 * @return array|mixed|null
 	 */
@@ -177,8 +222,41 @@ class GROUP_LDAP extends BackendUtility implements \OCP\GroupInterface {
 				}
 			}
 		}
+		
+		$allMembers = array_merge($allMembers, $this->getDynamicGroupMembers($dnGroup));
+		
 		$this->access->connection->writeToCache($cacheKey, $allMembers);
 		return $allMembers;
+	}
+
+	/**
+	 * @param string $DN
+	 * @param array|null &$seen
+	 * @return array
+	 */
+	private function _getGroupDNsFromMemberOf($DN, &$seen = null) {
+		if ($seen === null) {
+			$seen = array();
+		}
+		if (array_key_exists($DN, $seen)) {
+			// avoid loops
+			return array();
+		}
+		$seen[$DN] = 1;
+		$groups = $this->access->readAttribute($DN, 'memberOf');
+		if (!is_array($groups)) {
+			return array();
+		}
+		$groups = $this->access->groupsMatchFilter($groups);
+		$allGroups =  $groups;
+		$nestedGroups = $this->access->connection->ldapNestedGroups;
+		if (intval($nestedGroups) === 1) {
+			foreach ($groups as $group) {
+				$subGroups = $this->_getGroupDNsFromMemberOf($group, $seen);
+				$allGroups = array_merge($allGroups, $subGroups);
+			}
+		}
+		return $allGroups;	
 	}
 
 	/**
@@ -210,7 +288,7 @@ class GROUP_LDAP extends BackendUtility implements \OCP\GroupInterface {
 		if(empty($result)) {
 			return false;
 		}
-		$dn = $result[0];
+		$dn = $result[0]['dn'][0];
 
 		//and now the group name
 		//NOTE once we have separate ownCloud group IDs and group names we can
@@ -354,6 +432,8 @@ class GROUP_LDAP extends BackendUtility implements \OCP\GroupInterface {
 	 *
 	 * This function fetches all groups a user belongs to. It does not check
 	 * if the user exists at all.
+	 *
+	 * This function includes groups based on dynamic group membership.
 	 */
 	public function getUserGroups($uid) {
 		if(!$this->enabled) {
@@ -372,15 +452,48 @@ class GROUP_LDAP extends BackendUtility implements \OCP\GroupInterface {
 		$groups = [];
 		$primaryGroup = $this->getUserPrimaryGroup($userDN);
 
+		$dynamicGroupMemberURL = strtolower($this->access->connection->ldapDynamicGroupMemberURL);
+
+		if (!empty($dynamicGroupMemberURL)) {
+			// look through dynamic groups to add them to the result array if needed
+			$groupsToMatch = $this->access->fetchListOfGroups(
+				$this->access->connection->ldapGroupFilter,array('dn',$dynamicGroupMemberURL));
+			foreach($groupsToMatch as $dynamicGroup) {
+				if (!array_key_exists($dynamicGroupMemberURL, $dynamicGroup)) {
+					continue;
+				}
+				$pos = strpos($dynamicGroup[$dynamicGroupMemberURL][0], '(');
+				if ($pos !== false) {
+					$memberUrlFilter = substr($dynamicGroup[$dynamicGroupMemberURL][0],$pos);
+					// apply filter via ldap search to see if this user is in this
+					// dynamic group
+					$userMatch = $this->access->readAttribute(
+						$uid,
+						$this->access->connection->ldapUserDisplayName,
+						$memberUrlFilter
+					);
+					if ($userMatch !== false) {
+						// match found so this user is in this group
+						$pos = strpos($dynamicGroup['dn'][0], ',');
+						if ($pos !== false) {
+							$membershipGroup = substr($dynamicGroup['dn'][0],3,$pos-3);
+							$groups[] = $membershipGroup;
+						}
+					}
+				} else {
+					\OCP\Util::writeLog('user_ldap', 'No search filter found on member url '.
+						'of group ' . print_r($dynamicGroup, true), \OCP\Util::DEBUG);
+				}
+			}
+		}
+
 		// if possible, read out membership via memberOf. It's far faster than
 		// performing a search, which still is a fallback later.
 		if(intval($this->access->connection->hasMemberOfFilterSupport) === 1
 			&& intval($this->access->connection->useMemberOfToDetectMembership) === 1
 		) {
-			$groupDNs = $this->access->readAttribute($userDN, 'memberOf');
-
+			$groupDNs = $this->_getGroupDNsFromMemberOf($userDN);
 			if (is_array($groupDNs)) {
-				$groupDNs = $this->access->groupsMatchFilter($groupDNs);
 				foreach ($groupDNs as $dn) {
 					$groupName = $this->access->dn2groupname($dn);
 					if(is_string($groupName)) {
@@ -390,6 +503,7 @@ class GROUP_LDAP extends BackendUtility implements \OCP\GroupInterface {
 					}
 				}
 			}
+			
 			if($primaryGroup !== false) {
 				$groups[] = $primaryGroup;
 			}
@@ -455,7 +569,7 @@ class GROUP_LDAP extends BackendUtility implements \OCP\GroupInterface {
 			array($this->access->connection->ldapGroupDisplayName, 'dn'));
 		if (is_array($groups)) {
 			foreach ($groups as $groupobj) {
-				$groupDN = $groupobj['dn'];
+				$groupDN = $groupobj['dn'][0];
 				$allGroups[$groupDN] = $groupobj;
 				$nestedGroups = $this->access->connection->ldapNestedGroups;
 				if (!empty($nestedGroups)) {
@@ -521,6 +635,7 @@ class GROUP_LDAP extends BackendUtility implements \OCP\GroupInterface {
 
 		$groupUsers = array();
 		$isMemberUid = (strtolower($this->access->connection->ldapGroupMemberAssocAttr) === 'memberuid');
+		$attrs = $this->access->userManager->getAttributes(true);
 		foreach($members as $member) {
 			if($isMemberUid) {
 				//we got uids, need to get their DNs to 'translate' them to user names
@@ -528,11 +643,11 @@ class GROUP_LDAP extends BackendUtility implements \OCP\GroupInterface {
 					str_replace('%uid', $member, $this->access->connection->ldapLoginFilter),
 					$this->access->getFilterPartForUserSearch($search)
 				));
-				$ldap_users = $this->access->fetchListOfUsers($filter, 'dn');
+				$ldap_users = $this->access->fetchListOfUsers($filter, $attrs, 1);
 				if(count($ldap_users) < 1) {
 					continue;
 				}
-				$groupUsers[] = $this->access->dn2username($ldap_users[0]);
+				$groupUsers[] = $this->access->dn2username($ldap_users[0]['dn'][0]);
 			} else {
 				//we got DNs, check if we need to filter by search or we can give back all of them
 				if(!empty($search)) {
@@ -617,7 +732,7 @@ class GROUP_LDAP extends BackendUtility implements \OCP\GroupInterface {
 					str_replace('%uid', $member, $this->access->connection->ldapLoginFilter),
 					$this->access->getFilterPartForUserSearch($search)
 				));
-				$ldap_users = $this->access->fetchListOfUsers($filter, 'dn');
+				$ldap_users = $this->access->fetchListOfUsers($filter, 'dn', 1);
 				if(count($ldap_users) < 1) {
 					continue;
 				}

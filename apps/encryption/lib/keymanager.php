@@ -2,9 +2,11 @@
 /**
  * @author Björn Schießle <schiessle@owncloud.com>
  * @author Clark Tomlinson <fallen013@gmail.com>
+ * @author Lukas Reschke <lukas@owncloud.com>
  * @author Thomas Müller <thomas.mueller@tmit.eu>
+ * @author Vincent Petry <pvince81@owncloud.com>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -23,12 +25,14 @@
 namespace OCA\Encryption;
 
 use OC\Encryption\Exceptions\DecryptionFailedException;
+use OC\Files\View;
 use OCA\Encryption\Crypto\Encryption;
 use OCA\Encryption\Exceptions\PrivateKeyMissingException;
 use OCA\Encryption\Exceptions\PublicKeyMissingException;
 use OCA\Encryption\Crypto\Crypt;
 use OCP\Encryption\Keys\IStorage;
 use OCP\IConfig;
+use OCP\IDBConnection;
 use OCP\ILogger;
 use OCP\IUserSession;
 
@@ -54,6 +58,10 @@ class KeyManager {
 	 * @var string
 	 */
 	private $publicShareKeyId;
+	/**
+	 * @var string
+	 */
+	private $masterKeyId;
 	/**
 	 * @var string UserID
 	 */
@@ -131,10 +139,20 @@ class KeyManager {
 			$this->config->setAppValue('encryption', 'publicShareKeyId', $this->publicShareKeyId);
 		}
 
+		$this->masterKeyId = $this->config->getAppValue('encryption',
+			'masterKeyId');
+		if (empty($this->masterKeyId)) {
+			$this->masterKeyId = 'master_' . substr(md5(time()), 0, 8);
+			$this->config->setAppValue('encryption', 'masterKeyId', $this->masterKeyId);
+		}
+
 		$this->keyId = $userSession && $userSession->isLoggedIn() ? $userSession->getUser()->getUID() : false;
 		$this->log = $log;
 	}
 
+	/**
+	 * check if key pair for public link shares exists, if not we create one
+	 */
 	public function validateShareKey() {
 		$shareKey = $this->getPublicShareKey();
 		if (empty($shareKey)) {
@@ -146,9 +164,29 @@ class KeyManager {
 				Encryption::ID);
 
 			// Encrypt private key empty passphrase
-			$encryptedKey = $this->crypt->symmetricEncryptFileContent($keyPair['privateKey'], '');
+			$encryptedKey = $this->crypt->encryptPrivateKey($keyPair['privateKey'], '');
 			$header = $this->crypt->generateHeader();
 			$this->setSystemPrivateKey($this->publicShareKeyId, $header . $encryptedKey);
+		}
+	}
+
+	/**
+	 * check if a key pair for the master key exists, if not we create one
+	 */
+	public function validateMasterKey() {
+		$masterKey = $this->getPublicMasterKey();
+		if (empty($masterKey)) {
+			$keyPair = $this->crypt->createKeyPair();
+
+			// Save public key
+			$this->keyStorage->setSystemUserKey(
+				$this->masterKeyId . '.publicKey', $keyPair['publicKey'],
+				Encryption::ID);
+
+			// Encrypt private key with system password
+			$encryptedKey = $this->crypt->encryptPrivateKey($keyPair['privateKey'], $this->getMasterKeyPassword(), $this->masterKeyId);
+			$header = $this->crypt->generateHeader();
+			$this->setSystemPrivateKey($this->masterKeyId, $header . $encryptedKey);
 		}
 	}
 
@@ -179,13 +217,12 @@ class KeyManager {
 	}
 
 	/**
-	 * @param $password
+	 * @param string $password
 	 * @return bool
 	 */
 	public function checkRecoveryPassword($password) {
 		$recoveryKey = $this->keyStorage->getSystemUserKey($this->recoveryKeyId . '.privateKey', Encryption::ID);
-		$decryptedRecoveryKey = $this->crypt->decryptPrivateKey($recoveryKey,
-			$password);
+		$decryptedRecoveryKey = $this->crypt->decryptPrivateKey($recoveryKey, $password);
 
 		if ($decryptedRecoveryKey) {
 			return true;
@@ -203,8 +240,8 @@ class KeyManager {
 		// Save Public Key
 		$this->setPublicKey($uid, $keyPair['publicKey']);
 
-		$encryptedKey = $this->crypt->symmetricEncryptFileContent($keyPair['privateKey'],
-			$password);
+		$encryptedKey = $this->crypt->encryptPrivateKey($keyPair['privateKey'], $password, $uid);
+
 		$header = $this->crypt->generateHeader();
 
 		if ($encryptedKey) {
@@ -226,8 +263,7 @@ class KeyManager {
 			$keyPair['publicKey'],
 			Encryption::ID);
 
-		$encryptedKey = $this->crypt->symmetricEncryptFileContent($keyPair['privateKey'],
-			$password);
+		$encryptedKey = $this->crypt->encryptPrivateKey($keyPair['privateKey'], $password);
 		$header = $this->crypt->generateHeader();
 
 		if ($encryptedKey) {
@@ -248,7 +284,7 @@ class KeyManager {
 
 	/**
 	 * @param $userId
-	 * @param $key
+	 * @param string $key
 	 * @return bool
 	 */
 	public function setPrivateKey($userId, $key) {
@@ -306,10 +342,16 @@ class KeyManager {
 
 		$this->session->setStatus(Session::INIT_EXECUTED);
 
+
 		try {
-			$privateKey = $this->getPrivateKey($uid);
-			$privateKey = $this->crypt->decryptPrivateKey($privateKey,
-				$passPhrase);
+			if($this->util->isMasterKeyEnabled()) {
+				$uid = $this->getMasterKeyId();
+				$passPhrase = $this->getMasterKeyPassword();
+				$privateKey = $this->getSystemPrivateKey($uid);
+			} else {
+				$privateKey = $this->getPrivateKey($uid);
+			}
+			$privateKey = $this->crypt->decryptPrivateKey($privateKey, $passPhrase, $uid);
 		} catch (PrivateKeyMissingException $e) {
 			return false;
 		} catch (DecryptionFailedException $e) {
@@ -327,7 +369,7 @@ class KeyManager {
 
 	/**
 	 * @param $userId
-	 * @return mixed
+	 * @return string
 	 * @throws PrivateKeyMissingException
 	 */
 	public function getPrivateKey($userId) {
@@ -341,7 +383,7 @@ class KeyManager {
 	}
 
 	/**
-	 * @param $path
+	 * @param string $path
 	 * @param $uid
 	 * @return string
 	 */
@@ -354,6 +396,11 @@ class KeyManager {
 			$privateKey = $this->keyStorage->getSystemUserKey($this->publicShareKeyId . '.privateKey', Encryption::ID);
 			$privateKey = $this->crypt->decryptPrivateKey($privateKey);
 		} else {
+
+			if ($this->util->isMasterKeyEnabled()) {
+				$uid = $this->getMasterKeyId();
+			}
+
 			$shareKey = $this->getShareKey($path, $uid);
 			$privateKey = $this->session->getPrivateKey();
 		}
@@ -368,9 +415,40 @@ class KeyManager {
 	}
 
 	/**
+	 * Get the current version of a file
+	 *
+	 * @param string $path
+	 * @param View $view
+	 * @return int
+	 */
+	public function getVersion($path, View $view) {
+		$fileInfo = $view->getFileInfo($path);
+		if($fileInfo === false) {
+			return 0;
+		}
+		return $fileInfo->getEncryptedVersion();
+	}
+
+	/**
+	 * Set the current version of a file
+	 *
+	 * @param string $path
+	 * @param int $version
+	 * @param View $view
+	 */
+	public function setVersion($path, $version, View $view) {
+		$fileInfo= $view->getFileInfo($path);
+
+		if($fileInfo !== false) {
+			$cache = $fileInfo->getStorage()->getCache();
+			$cache->update($fileInfo->getId(), ['encrypted' => $version, 'encryptedVersion' => $version]);
+		}
+	}
+
+	/**
 	 * get the encrypted file key
 	 *
-	 * @param $path
+	 * @param string $path
 	 * @return string
 	 */
 	public function getEncryptedFileKey($path) {
@@ -466,7 +544,7 @@ class KeyManager {
 	}
 
 	/**
-	 * @param $purpose
+	 * @param string $purpose
 	 * @param bool $timestamp
 	 * @param bool $includeUserKeys
 	 */
@@ -492,13 +570,17 @@ class KeyManager {
 	}
 
 	/**
-	 * @param $uid
+	 * @param string $uid
 	 * @return bool
 	 */
 	private function deletePrivateKey($uid) {
 		return $this->keyStorage->deleteUserKey($uid, $this->privateKeyId, Encryption::ID);
 	}
 
+	/**
+	 * @param string $path
+	 * @return bool
+	 */
 	public function deleteAllFileKeys($path) {
 		return $this->keyStorage->deleteAllFileKeys($path);
 	}
@@ -568,5 +650,38 @@ class KeyManager {
 		}
 
 		return $publicKeys;
+	}
+
+	/**
+	 * get master key password
+	 *
+	 * @return string
+	 * @throws \Exception
+	 */
+	public function getMasterKeyPassword() {
+		$password = $this->config->getSystemValue('secret');
+		if (empty($password)){
+			throw new \Exception('Can not get secret from ownCloud instance');
+		}
+
+		return $password;
+	}
+
+	/**
+	 * return master key id
+	 *
+	 * @return string
+	 */
+	public function getMasterKeyId() {
+		return $this->masterKeyId;
+	}
+
+	/**
+	 * get public master key
+	 *
+	 * @return string
+	 */
+	public function getPublicMasterKey() {
+		return $this->keyStorage->getSystemUserKey($this->masterKeyId . '.publicKey', Encryption::ID);
 	}
 }

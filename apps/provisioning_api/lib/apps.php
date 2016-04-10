@@ -1,10 +1,12 @@
 <?php
 /**
  * @author Joas Schilling <nickvergessen@owncloud.com>
+ * @author Lukas Reschke <lukas@owncloud.com>
  * @author Morris Jobke <hey@morrisjobke.de>
+ * @author Roeland Jago Douma <rullzer@owncloud.com>
  * @author Tom Needham <tom@owncloud.com>
  *
- * @copyright Copyright (c) 2015, ownCloud, Inc.
+ * @copyright Copyright (c) 2016, ownCloud, Inc.
  * @license AGPL-3.0
  *
  * This code is free software: you can redistribute it and/or modify
@@ -23,21 +25,32 @@
 
 namespace OCA\Provisioning_API;
 
+use OC\OCSClient;
 use \OC_OCS_Result;
 use \OC_App;
 
 class Apps {
-
 	/** @var \OCP\App\IAppManager */
 	private $appManager;
+	/** @var OCSClient */
+	private $ocsClient;
 
-	public function __construct(\OCP\App\IAppManager $appManager) {
+	/**
+	 * @param \OCP\App\IAppManager $appManager
+	 */
+	public function __construct(\OCP\App\IAppManager $appManager,
+								OCSClient $ocsClient) {
 		$this->appManager = $appManager;
+		$this->ocsClient = $ocsClient;
 	}
 
-	public function getApps($parameters){
-		$apps = OC_App::listAllApps();
-		$list = array();
+	/**
+	 * @param array $parameters
+	 * @return OC_OCS_Result
+	 */
+	public function getApps($parameters) {
+		$apps = OC_App::listAllApps(false, true, $this->ocsClient);
+		$list = [];
 		foreach($apps as $app) {
 			$list[] = $app['id'];
 		}
@@ -62,7 +75,11 @@ class Apps {
 		}
 	}
 
-	public function getAppInfo($parameters){
+	/**
+	 * @param array $parameters
+	 * @return OC_OCS_Result
+	 */
+	public function getAppInfo($parameters) {
 		$app = $parameters['appid'];
 		$info = \OCP\App::getAppInfo($app);
 		if(!is_null($info)) {
@@ -72,13 +89,21 @@ class Apps {
 		}
 	}
 
-	public function enable($parameters){
+	/**
+	 * @param array $parameters
+	 * @return OC_OCS_Result
+	 */
+	public function enable($parameters) {
 		$app = $parameters['appid'];
 		$this->appManager->enableApp($app);
 		return new OC_OCS_Result(null, 100);
 	}
 
-	public function disable($parameters){
+	/**
+	 * @param array $parameters
+	 * @return OC_OCS_Result
+	 */
+	public function disable($parameters) {
 		$app = $parameters['appid'];
 		$this->appManager->disableApp($app);
 		return new OC_OCS_Result(null, 100);
